@@ -76,7 +76,6 @@
                 window.addEventListener('hashchange', () => setHash(window.location.hash));
             }, []);
 
-            // Formato esperado: #/store/ID, #/admin/ID, #/superadmin
             const parts = hash.replace(/^#\//, '').split('/');
             const view = parts[0];
             const businessId = parts[1];
@@ -85,14 +84,11 @@
             if (view === 'admin' && businessId) return <AdminApp businessId={businessId} />;
             if (view === 'store' && businessId) return <ClientApp businessId={businessId} />;
             
-            // Pantalla de inicio (si no hay hash)
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white p-4 text-center">
                     <h1 className="text-3xl font-display font-bold text-green-400 mb-4">MARKETPLACE VIRTUAL</h1>
                     <p className="text-slate-400 mb-8">Plataforma SaaS para emprendedores.</p>
-                    <div className="flex gap-4">
-                        <a href="#/superadmin" className="bg-red-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-600">Acceso Superadmin</a>
-                    </div>
+                    <a href="#/superadmin" className="bg-red-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-600">Acceso Superadmin</a>
                 </div>
             );
         }
@@ -114,15 +110,15 @@
             const [lastOrderInfo, setLastOrderInfo] = useState(null);
 
             useEffect(() => {
-                const ref = db.collection('businesses').doc(businessId);
-                ref.get().then(doc => {
+                const bRef = db.collection('businesses').doc(businessId);
+                bRef.get().then(doc => {
                     if (doc.exists) setBusiness(doc.data());
                     setLoading(false);
                 });
-                ref.collection('products').orderBy('order', 'asc').onSnapshot(snap => {
+                bRef.collection('products').orderBy('order', 'asc').onSnapshot(snap => {
                     setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
                 });
-                ref.collection('config').doc('client_payment').onSnapshot(doc => {
+                bRef.collection('config').doc('client_payment').onSnapshot(doc => {
                     if (doc.exists) setClientConfig(doc.data());
                 });
             }, [businessId]);
@@ -174,8 +170,8 @@
 
                     const batch = db.batch();
                     cart.forEach(item => {
-                        const productRef = db.collection('businesses').doc(businessId).collection('products').doc(item.id);
-                        batch.update(productRef, { stock: item.stock - item.qty });
+                        const pRef = db.collection('businesses').doc(businessId).collection('products').doc(item.id);
+                        batch.update(pRef, { stock: item.stock - item.qty });
                     });
                     await batch.commit();
                     
@@ -332,6 +328,7 @@
             const [commReceipt, setCommReceipt] = useState(null);
             const [commAmount, setCommAmount] = useState('');
             const [commDate, setCommDate] = useState('');
+            const [commRef, setCommRef] = useState('');
             const [newPass, setNewPass] = useState('');
 
             const [editYapeNumber, setEditYapeNumber] = useState('');
@@ -341,7 +338,12 @@
 
             useEffect(() => {
                 bRef.get().then(doc => {
-                    if (doc.exists) setBusiness(doc.data());
+                    if (doc.exists) {
+                        const bData = doc.data();
+                        setBusiness(bData);
+                        setEditYapeNumber(bData.yapeNumber || '');
+                        setEditYapeQR(bData.yapeQR || '');
+                    }
                 });
                 bRef.collection('products').orderBy('order', 'asc').onSnapshot(snap => setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
                 db.collection('platform_config').doc('superadmin_payment').onSnapshot(doc => { if(doc.exists) setSuperadminConfig(doc.data()) });
@@ -354,7 +356,7 @@
                 }
             }, [auth]);
 
-            const login = async (e) => {
+            const login = (e) => {
                 e.preventDefault();
                 if (business && pass === business.adminPassword) { setAuth(true); setError(''); }
                 else setError('Contraseña incorrecta');
@@ -365,12 +367,21 @@
                 const newOrder = products.length > 0 ? Math.max(...products.map(p => p.order || 0)) + 1 : 1;
                 await bRef.collection('products').add({ code: "N", name: "Nuevo", price: 1.00, img: "https://via.placeholder.com/150", stock: 0, order: newOrder }); 
             };
+            const moveProduct = async (id, direction) => {
+                const currentIndex = products.findIndex(p => p.id === id);
+                const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+                if (targetIndex < 0 || targetIndex >= products.length) return; 
+                const batch = db.batch();
+                batch.update(bRef.collection('products').doc(products[currentIndex].id), { order: products[targetIndex].order });
+                batch.update(bRef.collection('products').doc(products[targetIndex].id), { order: products[currentIndex].order });
+                await batch.commit();
+            };
             const updateProductField = async (id, field, value) => { await bRef.collection('products').doc(id).update({ [field]: value }); };
             const deleteProduct = async (id) => { if(confirm("¿Eliminar?")) await bRef.collection('products').doc(id).delete(); };
-            
+
             const saveClientConfig = async (e) => {
                 e.preventDefault();
-                await bRef.collection('config').doc('client_payment').set({ yapeNumber: editYapeNumber, yapeQR: editYapeQR });
+                await bRef.update({ yapeNumber: editYapeNumber, yapeQR: editYapeQR });
                 alert("Configuración de pago guardada.");
             };
 
@@ -385,8 +396,9 @@
             const submitPayment = async (e) => {
                 e.preventDefault();
                 if(!commReceipt || !commAmount || !commDate) { alert("Faltan datos."); return; }
-                await bRef.collection('payments').add({ receipt: commReceipt, amountPaid: parseFloat(commAmount), paymentDate: commDate, status: "Pendiente", createdAt: Date.now() });
-                alert("Comprobante enviado.");
+                await bRef.collection('payments').add({ receipt: commReceipt, amountPaid: parseFloat(commAmount), paymentDate: commDate, reference: commRef, status: "Pendiente", createdAt: Date.now() });
+                setCommReceipt(null); setCommAmount(''); setCommDate(''); setCommRef('');
+                alert("Comprobante enviado al administrador.");
             };
 
             if (!business) return <div className="min-h-screen flex items-center justify-center text-red-400">Cargando negocio...</div>;
@@ -412,6 +424,8 @@
             const totalPaid = payments.filter(p => p.status === "Aprobado").reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
             const currentDebt = totalCommissionAllTime - totalPaid;
 
+            const filteredOrders = orders.filter(o => JSON.stringify(o).toLowerCase().includes(searchTerm.toLowerCase()));
+
             return (
                 <div className="min-h-screen bg-slate-900 font-inter p-4">
                     {modalReceipt && (
@@ -424,20 +438,20 @@
                         <div className="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
                             <div>
                                 <h2 className="text-xl font-display font-bold text-green-400">{business.name.toUpperCase()} - ADMIN</h2>
-                                <p className="text-sm text-slate-500">Control de Pedidos</p>
+                                <p className="text-sm text-slate-500">Control de Pedidos (Tiempo Real)</p>
                             </div>
                             <a href={`#/store/${businessId}`} className="text-sm text-slate-400 hover:text-white border border-slate-700 px-3 py-1 rounded">← Volver</a>
                         </div>
                         <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-                            <button onClick={() => setTab('pedidos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'pedidos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Pedidos</button>
-                            <button onClick={() => setTab('productos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'productos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Productos</button>
-                            <button onClick={() => setTab('pagos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'pagos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Pagos</button>
-                            <button onClick={() => setTab('tienda')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'tienda' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Config</button>
+                            <button onClick={() => setTab('pedidos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'pedidos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Pedidos</button>
+                            <button onClick={() => setTab('productos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'productos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Productos</button>
+                            <button onClick={() => setTab('pagos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'pagos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Pagos Plataforma</button>
+                            <button onClick={() => setTab('tienda')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'tienda' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Mi Tienda</button>
                         </div>
 
                         {tab === 'pedidos' && (
                             <>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
                                     <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
                                         <p className="text-slate-400 text-xs">Ventas Históricas</p>
                                         <p className="text-xl font-bold text-white">S/ {totalSalesAllTime.toFixed(2)}</p>
@@ -446,20 +460,35 @@
                                         <p className="text-slate-400 text-xs">Comisión Pendiente ({(rate*100).toFixed(0)}%)</p>
                                         <p className="text-xl font-bold text-red-400">S/ {currentDebt.toFixed(2)}</p>
                                     </div>
+                                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-center">
+                                        <button onClick={() => {
+                                            let csv = "Codigo,Fecha,Cliente,Pedido,Total,Estado\n";
+                                            orders.forEach(o => { csv += `"${o.code || 'N/A'}","${new Date(o.createdAt).toLocaleString()}","${o.client}","${o.items}",${o.total.toFixed(2)},"${o.status}"\n`; });
+                                            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                                            const link = document.createElement("a");
+                                            link.href = URL.createObjectURL(blob);
+                                            link.download = `pedidos_${businessId}.csv`;
+                                            link.click();
+                                        }} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold w-full">📄 Descargar Excel</button>
+                                    </div>
                                 </div>
                                 <input type="text" placeholder="🔍 Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2 rounded-lg border border-slate-700 bg-slate-800 text-white text-sm mb-4" />
                                 <div className="space-y-3">
-                                    {orders.filter(o => JSON.stringify(o).toLowerCase().includes(searchTerm.toLowerCase())).map(order => (
-                                        <div key={order.id} className={`bg-slate-800 p-4 rounded-xl border-l-4 ${order.status === 'Anulado' ? 'border-red-500 opacity-60' : 'border-green-500'}`}>
-                                            <p className="text-green-400 font-bold text-sm">Cód: {order.code}</p>
-                                            <p className="text-white text-sm">👤 {order.client}</p>
-                                            <p className="text-white text-sm">{order.items}</p>
-                                            <p className="text-green-400 text-sm mb-2">Total: S/ {order.total.toFixed(2)}</p>
-                                            <button onClick={() => setModalReceipt(order.receipt)} className="text-xs bg-slate-700 text-white px-2 py-1 rounded mb-2">👁️ Ver</button>
-                                            <div className="flex gap-1 mt-2">
-                                                {order.status === 'Recibido' && <button onClick={() => updateOrderStatus(order.id, 'En Camino')} className="text-xs bg-blue-500 text-white px-2 py-1 rounded font-bold flex-1">Despachar</button>}
-                                                {order.status === 'En Camino' && <button onClick={() => updateOrderStatus(order.id, 'Entregado')} className="text-xs bg-green-500 text-white px-2 py-1 rounded font-bold flex-1">Entregado</button>}
-                                                {order.status !== 'Entregado' && order.status !== 'Anulado' && <button onClick={() => updateOrderStatus(order.id, 'Anulado')} className="text-xs bg-red-800 text-white px-2 py-1 rounded font-bold flex-1">Anular</button>}
+                                    {filteredOrders.map(order => (
+                                        <div key={order.id} className={`bg-slate-800 p-4 rounded-xl border-l-4 ${order.status === 'Anulado' ? 'border-red-500 opacity-60' : 'border-green-500'} flex justify-between items-start`}>
+                                            <div>
+                                                <p className="text-green-400 font-bold text-sm mb-1">Cód: {order.code}</p>
+                                                <p className="font-bold text-white text-sm">👤 {order.client}</p>
+                                                <p className="text-white text-sm">{order.items}</p>
+                                                <p className="text-green-400 text-sm font-semibold mb-2">Total: S/ {order.total.toFixed(2)}</p>
+                                                <p className="text-xs text-slate-400">📍 {order.location}</p>
+                                                <button onClick={() => setModalReceipt(order.receipt)} className="inline-block mt-2 text-xs bg-slate-700 text-white px-2 py-1 rounded">👁️ Ver</button>
+                                            </div>
+                                            <div className="text-right flex flex-col gap-1 w-24">
+                                                <span className={`block px-3 py-1 rounded-full text-xs font-bold mb-1 text-center ${order.status === 'Recibido' ? 'bg-yellow-900/50 text-yellow-400' : order.status === 'En Camino' ? 'bg-blue-900/50 text-blue-400' : order.status === 'Anulado' ? 'bg-red-900/50 text-red-400' : 'bg-green-900/50 text-green-400'}`}>{order.status}</span>
+                                                {order.status === 'Recibido' && <button onClick={() => updateOrderStatus(order.id, 'En Camino')} className="text-xs bg-blue-500 text-white px-2 py-1 rounded font-bold">Despachar</button>}
+                                                {order.status === 'En Camino' && <button onClick={() => updateOrderStatus(order.id, 'Entregado')} className="text-xs bg-green-500 text-white px-2 py-1 rounded font-bold">Entregado</button>}
+                                                {order.status !== 'Entregado' && order.status !== 'Anulado' && <button onClick={() => updateOrderStatus(order.id, 'Anulado')} className="text-xs bg-red-800 text-white px-2 py-1 rounded font-bold">Anular</button>}
                                             </div>
                                         </div>
                                     ))}
@@ -469,13 +498,31 @@
 
                         {tab === 'productos' && (
                             <div className="bg-slate-800 p-4 rounded-xl">
-                                <button onClick={addNewProduct} className="bg-green-500 text-white px-3 py-1.5 rounded-lg text-sm font-bold mb-4">+ Agregar</button>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-lg font-bold text-white">Inventario (Usa ▲▼)</h3>
+                                    <button onClick={addNewProduct} className="bg-green-500 text-white px-3 py-1.5 rounded-lg text-sm font-bold">+ Agregar</button>
+                                </div>
                                 {products.map(p => (
                                     <div key={p.id} className="bg-slate-900 p-3 rounded-lg mb-2 flex gap-2 items-center border border-slate-700">
-                                        <img src={p.img} className="w-12 h-12 rounded object-cover" alt={p.name} />
+                                        <div className="flex flex-col items-center gap-1">
+                                            <img src={p.img} className="w-12 h-12 rounded object-cover" alt={p.name} />
+                                            <label className="text-[8px] text-green-400 cursor-pointer">
+                                                Editar
+                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => updateProductField(p.id, 'img', src))} />
+                                            </label>
+                                        </div>
                                         <input type="text" value={p.name} onChange={(e) => updateProductField(p.id, 'name', e.target.value)} className="flex-1 bg-slate-800 text-white text-sm p-1 rounded border border-slate-700" />
-                                        <input type="number" value={p.price} onChange={(e) => updateProductField(p.id, 'price', parseFloat(e.target.value)||0)} className="w-20 bg-slate-800 text-white text-sm p-1 rounded border border-slate-700" />
-                                        <button onClick={() => deleteProduct(p.id)} className="text-red-400">🗑️</button>
+                                        <input type="number" value={p.price} onChange={(e) => updateProductField(p.id, 'price', parseFloat(e.target.value)||0)} className="w-16 bg-slate-800 text-white text-sm p-1 rounded border border-slate-700" />
+                                        <div className="flex gap-1">
+                                            <button onClick={() => updateProductField(p.id, 'stock', p.stock - 1)} className="text-white bg-red-500 w-5 h-5 rounded text-xs">-</button>
+                                            <span className="text-white text-xs w-5 text-center">{p.stock}</span>
+                                            <button onClick={() => updateProductField(p.id, 'stock', p.stock + 1)} className="text-white bg-green-500 w-5 h-5 rounded text-xs">+</button>
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <button onClick={() => moveProduct(p.id, 'up')} className="text-white bg-slate-600 w-5 h-3 rounded-t text-[8px]">▲</button>
+                                            <button onClick={() => moveProduct(p.id, 'down')} className="text-white bg-slate-600 w-5 h-3 rounded-b text-[8px]">▼</button>
+                                        </div>
+                                        <button onClick={() => deleteProduct(p.id)} className="text-red-400 text-sm">🗑️</button>
                                     </div>
                                 ))}
                             </div>
@@ -483,23 +530,39 @@
 
                         {tab === 'pagos' && (
                             <div>
+                                <div className="bg-slate-800 p-4 rounded-xl border border-red-500/30 mb-6">
+                                    <p className="text-slate-400 text-xs">Deuda Actual con Plataforma</p>
+                                    <p className="text-xl font-bold text-red-400">S/ {currentDebt.toFixed(2)}</p>
+                                </div>
                                 <div className="bg-slate-800 p-4 rounded-xl mb-6">
                                     <h3 className="text-lg font-bold text-white mb-4">Declarar Pago</h3>
-                                    <div className="flex flex-col gap-2">
-                                        <input type="number" value={commAmount} onChange={(e) => setCommAmount(e.target.value)} placeholder="Monto (S/)" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm" />
-                                        <input type="date" value={commDate} onChange={(e) => setCommDate(e.target.value)} className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm" />
-                                        <input type="file" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setCommReceipt(src))} className="w-full text-sm text-slate-400 file:bg-green-900/50 file:text-green-400 file:rounded file:border-0" />
-                                        <button onClick={submitPayment} className="bg-green-500 text-white py-2 rounded-lg font-bold">Enviar</button>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="flex flex-col items-center justify-center bg-slate-900 p-4 rounded-lg">
+                                            {superadminConfig.yapeQR ? <img src={superadminConfig.yapeQR} alt="QR" className="w-32 h-32 mb-2 rounded object-cover" /> : <p className="text-slate-500 text-sm my-4">Superadmin no ha configurado QR.</p>}
+                                            {superadminConfig.yapeNumber && <p className="text-green-400 font-bold">{superadminConfig.yapeNumber}</p>}
+                                        </div>
+                                        <form onSubmit={submitPayment} className="flex flex-col gap-2">
+                                            <input type="number" value={commAmount} onChange={(e) => setCommAmount(e.target.value)} placeholder="Monto Pagado (S/) *" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm" required />
+                                            <input type="date" value={commDate} onChange={(e) => setCommDate(e.target.value)} className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm" required />
+                                            <input type="text" value={commRef} onChange={(e) => setCommRef(e.target.value)} placeholder="Referencia (Opcional)" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm" />
+                                            <input type="file" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setCommReceipt(src))} className="w-full text-sm text-slate-400 file:bg-green-900/50 file:text-green-400 file:rounded file:border-0" required />
+                                            <button type="submit" className="bg-green-500 text-white py-2 rounded-lg font-bold">Enviar Declaración</button>
+                                        </form>
                                     </div>
                                 </div>
-                                <div className="space-y-3">
-                                    {payments.map(pay => (
-                                        <div key={pay.id} className="bg-slate-800 p-3 rounded-xl flex justify-between items-center">
-                                            <span className="text-white text-sm">S/ {pay.amountPaid} - {pay.status}</span>
-                                            <button onClick={() => setModalReceipt(pay.receipt)} className="text-xs bg-slate-700 text-white px-2 py-1 rounded">Ver</button>
+                                <h3 className="text-lg font-bold text-white mb-4">Historial</h3>
+                                {payments.map(pay => (
+                                    <div key={pay.id} className="bg-slate-800 p-3 rounded-xl border-l-4 border-blue-500 mb-2 flex justify-between items-center">
+                                        <div>
+                                            <p className="text-white text-sm font-bold">S/ {pay.amountPaid} - {pay.paymentDate}</p>
+                                            <p className="text-slate-400 text-xs">{pay.reference || 'Sin ref'}</p>
                                         </div>
-                                    ))}
-                                </div>
+                                        <div className="flex gap-2 items-center">
+                                            <span className={`text-xs font-bold ${pay.status === 'Pendiente' ? 'text-yellow-400' : pay.status === 'Rechazado' ? 'text-red-400' : 'text-green-400'}`}>{pay.status}</span>
+                                            <button onClick={() => setModalReceipt(pay.receipt)} className="text-xs bg-slate-700 text-white px-2 py-1 rounded">👁️</button>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         )}
 
@@ -508,7 +571,10 @@
                                 <div className="bg-slate-800 p-4 rounded-xl">
                                     <h3 className="text-lg font-bold text-white mb-4">Configuración de Yape</h3>
                                     <input type="text" value={editYapeNumber} onChange={(e) => setEditYapeNumber(e.target.value)} placeholder="Número Yape" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm mb-2" />
-                                    <input type="file" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setEditYapeQR(src))} className="w-full text-sm text-slate-400 mb-2" />
+                                    <div className="flex items-center gap-4 mb-2">
+                                        <img src={editYapeQR || "https://via.placeholder.com/100"} className="w-16 h-16 rounded object-cover" alt="QR" />
+                                        <input type="file" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setEditYapeQR(src))} className="text-sm text-slate-400" />
+                                    </div>
                                     <button onClick={saveClientConfig} className="bg-green-500 text-white py-2 px-4 rounded-lg font-bold">Guardar Yape</button>
                                 </div>
                                 <div className="bg-slate-800 p-4 rounded-xl">
@@ -528,7 +594,6 @@
             const [auth, setAuth] = useState(false);
             const [pass, setPass] = useState('');
             const [businesses, setBusinesses] = useState([]);
-            const [superadminConfig, setSuperadminConfig] = useState({});
             const [showForm, setShowForm] = useState(false);
             const [newBiz, setNewBiz] = useState({ name: '', id: '', password: '', rate: 5 });
 
@@ -537,7 +602,6 @@
                     db.collection('businesses').onSnapshot(snap => {
                         setBusinesses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
                     });
-                    db.collection('platform_config').doc('superadmin_payment').onSnapshot(doc => { if(doc.exists) setSuperadminConfig(doc.data()) });
                 }
             }, [auth]);
 
@@ -563,13 +627,15 @@
                     createdAt: Date.now()
                 });
                 
-                // Inicializar productos dummy
                 await bRef.collection('products').add({ code: "P1", name: "Producto Ejemplo", price: 10.00, img: "https://via.placeholder.com/150", stock: 100, order: 1 });
                 
                 setNewBiz({ name: '', id: '', password: '', rate: 5 });
                 setShowForm(false);
                 alert("Negocio creado con éxito!");
             };
+
+            const approvePayment = async (bId, payId) => { await db.collection('businesses').doc(bId).collection('payments').doc(payId).update({ status: "Aprobado" }); };
+            const rejectPayment = async (bId, payId) => { await db.collection('businesses').doc(bId).collection('payments').doc(payId).update({ status: "Rechazado" }); };
 
             if (!auth) {
                 return (
@@ -598,16 +664,16 @@
                             <div className="bg-slate-900 p-4 rounded-xl mb-6 border border-green-500">
                                 <h3 className="text-lg font-bold mb-4">Datos del Nuevo Negocio</h3>
                                 <form onSubmit={createBusiness} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <input type="text" value={newBiz.name} onChange={(e) => setNewBiz({...newBiz, name: e.target.value})} placeholder="Nombre (Ej: Abi Kôbô)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
-                                    <input type="text" value={newBiz.id} onChange={(e) => setNewBiz({...newBiz, id: e.target.value})} placeholder="ID URL (Ej: abi-kobo)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
-                                    <input type="text" value={newBiz.password} onChange={(e) => setNewBiz({...newBiz, password: e.target.value})} placeholder="Contraseña inicial para el Admin" className="bg-slate-800 p-2 rounded border border-slate-700" required />
+                                    <input type="text" value={newBiz.name} onChange={(e) => setNewBiz({...newBiz, name: e.target.value})} placeholder="Nombre (Ej: Lili Market)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
+                                    <input type="text" value={newBiz.id} onChange={(e) => setNewBiz({...newBiz, id: e.target.value})} placeholder="ID URL (Ej: lili-market)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
+                                    <input type="text" value={newBiz.password} onChange={(e) => setNewBiz({...newBiz, password: e.target.value})} placeholder="Contraseña inicial" className="bg-slate-800 p-2 rounded border border-slate-700" required />
                                     <input type="number" value={newBiz.rate} onChange={(e) => setNewBiz({...newBiz, rate: e.target.value})} placeholder="Comisión (%)" className="bg-slate-800 p-2 rounded border border-slate-700" />
                                     <button type="submit" className="bg-green-500 text-white py-2 rounded font-bold col-span-full">Crear Negocio</button>
                                 </form>
                             </div>
                         )}
 
-                        <h3 className="text-lg font-bold mb-4">Negocios Activos ({businesses.length})</h3>
+                        <h3 className="text-lg font-bold mb-4">Negociios Activos ({businesses.length})</h3>
                         <div className="space-y-4">
                             {businesses.map(b => {
                                 const rate = b.commissionRate || 0.05;
@@ -617,10 +683,7 @@
                                             <h4 className="text-lg font-bold">{b.name} <span className="text-slate-500 text-xs">({b.id})</span></h4>
                                             <span className="text-xs bg-red-900/50 text-red-400 px-2 py-1 rounded">Comisión: {(rate*100).toFixed(0)}%</span>
                                         </div>
-                                        <div className="text-sm text-slate-400 mb-3">
-                                            <p>Contraseña Admin: {b.adminPassword}</p>
-                                        </div>
-                                        <div className="flex flex-col md:flex-row gap-2 text-xs">
+                                        <div className="flex flex-col md:flex-row gap-2 text-xs mt-4 border-t border-slate-800 pt-4">
                                             <a href={`#/store/${b.id}`} target="_blank" className="bg-blue-600 text-white px-3 py-2 rounded font-bold text-center flex-1">Ver Tienda</a>
                                             <a href={`#/admin/${b.id}`} target="_blank" className="bg-slate-700 text-white px-3 py-2 rounded font-bold text-center flex-1">Panel Admin</a>
                                         </div>
