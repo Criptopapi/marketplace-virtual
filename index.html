@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lili Market - Expendedora Virtual</title>
+    <title>MarketPlace Virtual</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -58,7 +58,7 @@
         };
 
         const sendTelegramMessage = async (order) => {
-            const text = `🛒 NUEVO PEDIDO - LILI MARKET (Cód: ${order.code})\n\n👤 Cliente: ${order.client}\n📍 Ubicación: ${order.location}\n📦 Pedido: ${order.items}\n💰 Total: S/ ${order.total.toFixed(2)}\n\n✅ Comprobante subido en la plataforma.`;
+            const text = `🛒 NUEVO PEDIDO - MARKETPLACE VIRTUAL (Cód: ${order.code})\n\n👤 Cliente: ${order.client}\n📍 Ubicación: ${order.location}\n📦 Pedido: ${order.items}\n💰 Total: S/ ${order.total.toFixed(2)}\n\n✅ Comprobante subido en la plataforma.`;
             try {
                 await fetch('/api/send-telegram', {
                     method: 'POST',
@@ -168,7 +168,7 @@
                 }
                 setLoadingOrder(true);
                 try {
-                    const orderCode = "LM-" + Date.now().toString().slice(-6);
+                    const orderCode = "MP-" + Date.now().toString().slice(-6);
                     const orderData = {
                         code: orderCode,
                         client: clientName,
@@ -205,7 +205,7 @@
                 return (
                     <div className="max-w-md mx-auto p-8 text-center bg-slate-900 min-h-screen flex flex-col justify-center">
                         <h2 className="text-3xl font-display font-bold text-green-400 mb-2">¡DESPACHADO! 🛒</h2>
-                        <p className="text-slate-300 mb-6">Lili Market recibió tu pedido.</p>
+                        <p className="text-slate-300 mb-6">MarketPlace Virtual recibió tu pedido.</p>
                         
                         <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 mb-6 text-left">
                             <p className="text-center text-green-400 font-display text-xl font-bold mb-4">CÓDIGO: {lastOrderInfo.code}</p>
@@ -228,8 +228,8 @@
                 <div className="max-w-md mx-auto bg-slate-800 min-h-screen relative pb-28 border-x border-slate-700">
                     <header className="p-4 flex justify-between items-center bg-black border-b-4 border-green-500 sticky top-0 z-20">
                         <div>
-                            <h1 className="text-xl font-display font-bold tracking-wider text-green-400">LILI MARKET</h1>
-                            <p className="text-[10px] text-slate-500 tracking-widest">MAQUINA EXPENDEDORA 24/7</p>
+                            <h1 className="text-xl font-display font-bold tracking-wider text-green-400">MARKETPLACE VIRTUAL</h1>
+                            <p className="text-[10px] text-slate-500 tracking-widest">TIENDA 24/7</p>
                         </div>
                         <div className="flex items-center gap-3">
                             <button onClick={onAdminClick} className="text-slate-600 text-xs hover:text-slate-400">⚙️ Admin</button>
@@ -363,7 +363,7 @@
             );
         }
 
-        // --- VISTA ADMIN (LILI) ---
+        // --- VISTA ADMIN (MARKETPLACE) ---
         function AdminApp({ onBackClick, products, clientConfig, superadminConfig, commissionRate }) {
             const [orders, setOrders] = useState([]);
             const [payments, setPayments] = useState([]);
@@ -497,7 +497,7 @@
                 const link = document.createElement("a");
                 const url = URL.createObjectURL(blob);
                 link.setAttribute("href", url);
-                link.setAttribute("download", "pedidos_lili_market.csv");
+                link.setAttribute("download", "pedidos_marketplace_virtual.csv");
                 link.style.visibility = 'hidden';
                 document.body.appendChild(link);
                 link.click();
@@ -508,7 +508,7 @@
                 return (
                     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
                         <form onSubmit={login} className="bg-slate-800 p-6 rounded-xl border border-slate-700 w-full max-w-sm">
-                            <h2 className="text-xl font-display font-bold text-green-400 mb-4 text-center">LILI MARKET - ADMIN</h2>
+                            <h2 className="text-xl font-display font-bold text-green-400 mb-4 text-center">MARKETPLACE VIRTUAL - ADMIN</h2>
                             <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Contraseña" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white mb-2" autoFocus />
                             {error && <p className="text-red-400 text-sm mb-2">{error}</p>}
                             <button type="submit" className="w-full bg-green-500 text-white py-2 rounded-lg font-bold">Entrar</button>
@@ -546,7 +546,7 @@
                     <div className="max-w-4xl mx-auto">
                         <div className="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
                             <div>
-                                <h2 className="text-xl font-display font-bold text-green-400">LILI MARKET - ADMIN</h2>
+                                <h2 className="text-xl font-display font-bold text-green-400">MARKETPLACE VIRTUAL - ADMIN</h2>
                                 <p className="text-sm text-slate-500">Control de Pedidos (Tiempo Real)</p>
                             </div>
                             <button onClick={onBackClick} className="text-sm text-slate-400 hover:text-white border border-slate-700 px-3 py-1 rounded">← Volver</button>
@@ -803,7 +803,7 @@
             const rejectPayment = async (id) => { await db.collection('commission_payments').doc(id).update({ status: "Rechazado" }); };
 
             const resetAdminPlatform = async () => {
-                if(confirm("⚠️ ¿Borrar TODOS los pedidos y pagos de Lili? Esto reiniciará su panel a cero.")) {
+                if(confirm("⚠️ ¿Borrar TODOS los pedidos y pagos de MarketPlace? Esto reiniciará su panel a cero.")) {
                     const ordersSnap = await db.collection('orders').get();
                     ordersSnap.forEach(doc => doc.ref.delete());
                     const paymentsSnap = await db.collection('commission_payments').get();
@@ -912,7 +912,7 @@
                                         <p className="text-2xl font-bold text-white">S/ {totalCommissionAllTime.toFixed(2)}</p>
                                     </div>
                                     <div className="bg-slate-900 p-4 rounded-xl border border-red-500">
-                                        <p className="text-slate-400 text-xs">Deuda Actual de Lili</p>
+                                        <p className="text-slate-400 text-xs">Deuda Actual de MarketPlace</p>
                                         <p className="text-2xl font-bold text-white">S/ {currentDebt.toFixed(2)}</p>
                                         <p className="text-green-400 text-sm mt-1">Total Cobrado: S/ {totalPaid.toFixed(2)}</p>
                                     </div>
@@ -921,8 +921,8 @@
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                                     <div className="bg-slate-900 p-4 rounded-xl border border-yellow-500/30 flex flex-col items-center justify-center text-center">
                                         <p className="text-yellow-400 text-sm font-bold mb-2">⚠️ Resetear Tienda (Admin)</p>
-                                        <p className="text-slate-400 text-xs mb-3">Borra todos los pedidos y pagos de Lili. Útil para empezar a operar limpio.</p>
-                                        <button onClick={resetAdminPlatform} className="bg-yellow-600 text-white px-4 py-2 rounded font-bold text-sm hover:bg-yellow-700 w-full">Resetear Panel de Lili</button>
+                                        <p className="text-slate-400 text-xs mb-3">Borra todos los pedidos y pagos de MarketPlace. Útil para empezar a operar limpio.</p>
+                                        <button onClick={resetAdminPlatform} className="bg-yellow-600 text-white px-4 py-2 rounded font-bold text-sm hover:bg-yellow-700 w-full">Resetear Panel de MarketPlace</button>
                                     </div>
                                     <div className="bg-slate-900 p-4 rounded-xl border border-red-500 flex flex-col items-center justify-center text-center">
                                         <p className="text-red-500 text-sm font-bold mb-2">🚨 Resetear Plataforma (Global)</p>
@@ -962,7 +962,7 @@
 
                         {tab === 'pagos' && (
                             <div>
-                                <h3 className="text-lg font-bold mb-4 text-red-500">Pagos de Comisión de Lili</h3>
+                                <h3 className="text-lg font-bold mb-4 text-red-500">Pagos de Comisión de MarketPlace</h3>
                                 <div className="space-y-4">
                                     {payments.length === 0 ? <div className="bg-slate-900 p-4 rounded-xl text-slate-500 text-center">No hay pagos registrados.</div> : (
                                         payments.map(pay => (
