@@ -220,7 +220,7 @@
 
                     <div className="p-4 vending-grid min-h-[calc(100vh-100px)]">
                         {availableProducts.length === 0 ? (
-                            <div className="text-center text-slate-500 mt-20 font-display">MÁQUINA VACÍA</div>
+                            <div className="text-center text-slate-500 mt-20 font-display">CATÁLOGO VACÍO</div>
                         ) : (
                             <div className="grid grid-cols-2 gap-4">
                                 {availableProducts.map(p => {
@@ -444,9 +444,9 @@
                         </div>
                         <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
                             <button onClick={() => setTab('pedidos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'pedidos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Pedidos</button>
-                            <button onClick={() => setTab('productos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'productos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Productos</button>
+                            <button onClick={() => setTab('productos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'productos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}}`}>Productos</button>
                             <button onClick={() => setTab('pagos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'pagos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Pagos Plataforma</button>
-                            <button onClick={() => setTab('tienda')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'tienda' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Mi Tienda</button>
+                            <button onClick={() => setTab('tienda')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'tienda' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}}`}>Mi Tienda</button>
                         </div>
 
                         {tab === 'pedidos' && (
@@ -593,17 +593,45 @@
         function SuperAdminApp() {
             const [auth, setAuth] = useState(false);
             const [pass, setPass] = useState('');
+            const [tab, setTab] = useState('negocios');
             const [businesses, setBusinesses] = useState([]);
+            const [superadminConfig, setSuperadminConfig] = useState({ yapeNumber: '', yapeQR: '' });
+            const [allPayments, setAllPayments] = useState([]);
             const [showForm, setShowForm] = useState(false);
+            const [modalReceipt, setModalReceipt] = useState(null);
             const [newBiz, setNewBiz] = useState({ name: '', id: '', password: '', rate: 5 });
+
+            const [editYapeNumber, setEditYapeNumber] = useState('');
+            const [editYapeQR, setEditYapeQR] = useState('');
+
+            useEffect(() => {
+                setEditYapeNumber(superadminConfig.yapeNumber || '');
+                setEditYapeQR(superadminConfig.yapeQR || '');
+            }, [superadminConfig]);
 
             useEffect(() => {
                 if (auth) {
                     db.collection('businesses').onSnapshot(snap => {
                         setBusinesses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
                     });
+                    db.collection('platform_config').doc('superadmin_payment').onSnapshot(doc => { if(doc.exists) setSuperadminConfig(doc.data()) });
                 }
             }, [auth]);
+
+            useEffect(() => {
+                if (auth && businesses.length > 0) {
+                    let tempPayments = [];
+                    let promises = businesses.map(b => {
+                        return db.collection('businesses').doc(b.id).collection('payments').get().then(snap => {
+                            snap.docs.forEach(d => tempPayments.push({ id: d.id, bizId: b.id, bizName: b.name, ...d.data() }));
+                        });
+                    });
+                    Promise.all(promises).then(() => {
+                        tempPayments.sort((a, b) => b.createdAt - a.createdAt);
+                        setAllPayments(tempPayments);
+                    });
+                }
+            }, [auth, businesses]);
 
             const login = async (e) => {
                 e.preventDefault();
@@ -631,11 +659,39 @@
                 
                 setNewBiz({ name: '', id: '', password: '', rate: 5 });
                 setShowForm(false);
-                alert("Negocio creado con éxito!");
+                alert("Negocio creado con éxito.");
             };
 
             const approvePayment = async (bId, payId) => { await db.collection('businesses').doc(bId).collection('payments').doc(payId).update({ status: "Aprobado" }); };
             const rejectPayment = async (bId, payId) => { await db.collection('businesses').doc(bId).collection('payments').doc(payId).update({ status: "Rechazado" }); };
+
+            const resetBusiness = async (bId) => {
+                if(!confirm(`⚠️ ¿Borrar pedidos y pagos de ${bId}?`)) return;
+                const bRef = db.collection('businesses').doc(bId);
+                const ordersSnap = await bRef.collection('orders').get();
+                ordersSnap.forEach(doc => doc.ref.delete());
+                const paySnap = await bRef.collection('payments').get();
+                paySnap.forEach(doc => doc.ref.delete());
+                alert("Datos reseteados.");
+            };
+
+            const deleteBusiness = async (bId) => {
+                if(!confirm(`🚨 ¿ELIMINAR ${bId} completamente? Esta acción no se puede deshacer.`)) return;
+                const bRef = db.collection('businesses').doc(bId);
+                const collections = ['products', 'orders', 'payments', 'config'];
+                for(let col of collections) {
+                    const snap = await bRef.collection(col).get();
+                    snap.forEach(doc => doc.ref.delete());
+                }
+                await bRef.delete();
+                alert("Negocio eliminado exitosamente.");
+            };
+
+            const saveSuperadminConfig = async (e) => {
+                e.preventDefault();
+                await db.collection('platform_config').doc('superadmin_payment').set({ yapeNumber: editYapeNumber, yapeQR: editYapeQR });
+                alert("Configuración de cobro guardada.");
+            };
 
             if (!auth) {
                 return (
@@ -651,46 +707,110 @@
             }
 
             return (
-                <div className="min-h-screen bg-black font-inter p-4 text-white">
+                <div className="min-h-screen bg-black font-inter p-4 text-white relative">
+                    {modalReceipt && (
+                        <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4" onClick={() => setModalReceipt(null)}>
+                            <img src={modalReceipt} className="max-w-full max-h-full rounded-lg" alt="Comprobante" />
+                            <button className="absolute top-4 right-4 text-white text-4xl">&times;</button>
+                        </div>
+                    )}
                     <div className="max-w-4xl mx-auto">
                         <div className="flex justify-between items-center mb-6 border-b border-red-500 pb-4">
-                            <h2 className="text-xl font-display font-bold text-red-500">SUPERADMIN - GESTIÓN DE NEGOCIOS</h2>
+                            <h2 className="text-xl font-display font-bold text-red-500">SUPERADMIN - GESTIÓN GLOBAL</h2>
                             <a href="#/" className="text-sm text-slate-400 hover:text-white border border-slate-700 px-3 py-1 rounded">← Salir</a>
                         </div>
 
-                        <button onClick={() => setShowForm(!showForm)} className="bg-green-500 text-white px-4 py-2 rounded font-bold text-sm mb-6">+ Crear Nuevo Negocio</button>
+                        <div className="flex gap-2 mb-6">
+                            <button onClick={() => setTab('negocios')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'negocios' ? 'bg-red-500 text-white' : 'bg-slate-900 text-slate-400'}`}>Negocios</button>
+                            <button onClick={() => setTab('pagos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'pagos' ? 'bg-red-500 text-white' : 'bg-slate-900 text-slate-400'}`}>Aprobación de Pagos</button>
+                            <button onClick={() => setTab('config')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'config' ? 'bg-red-500 text-white' : 'bg-slate-900 text-slate-400'}`}>Config. Plataforma</button>
+                        </div>
 
-                        {showForm && (
-                            <div className="bg-slate-900 p-4 rounded-xl mb-6 border border-green-500">
-                                <h3 className="text-lg font-bold mb-4">Datos del Nuevo Negocio</h3>
-                                <form onSubmit={createBusiness} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <input type="text" value={newBiz.name} onChange={(e) => setNewBiz({...newBiz, name: e.target.value})} placeholder="Nombre (Ej: Lili Market)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
-                                    <input type="text" value={newBiz.id} onChange={(e) => setNewBiz({...newBiz, id: e.target.value})} placeholder="ID URL (Ej: lili-market)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
-                                    <input type="text" value={newBiz.password} onChange={(e) => setNewBiz({...newBiz, password: e.target.value})} placeholder="Contraseña inicial" className="bg-slate-800 p-2 rounded border border-slate-700" required />
-                                    <input type="number" value={newBiz.rate} onChange={(e) => setNewBiz({...newBiz, rate: e.target.value})} placeholder="Comisión (%)" className="bg-slate-800 p-2 rounded border border-slate-700" />
-                                    <button type="submit" className="bg-green-500 text-white py-2 rounded font-bold col-span-full">Crear Negocio</button>
-                                </form>
+                        {tab === 'negocios' && (
+                            <>
+                                <button onClick={() => setShowForm(!showForm)} className="bg-green-500 text-white px-4 py-2 rounded font-bold text-sm mb-6">+ Crear Nuevo Negocio</button>
+                                {showForm && (
+                                    <div className="bg-slate-900 p-4 rounded-xl mb-6 border border-green-500">
+                                        <h3 className="text-lg font-bold mb-4">Datos del Nuevo Negocio</h3>
+                                        <form onSubmit={createBusiness} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <input type="text" value={newBiz.name} onChange={(e) => setNewBiz({...newBiz, name: e.target.value})} placeholder="Nombre (Ej: Lili Market)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
+                                            <input type="text" value={newBiz.id} onChange={(e) => setNewBiz({...newBiz, id: e.target.value})} placeholder="ID URL (Ej: lili-market)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
+                                            <input type="text" value={newBiz.password} onChange={(e) => setNewBiz({...newBiz, password: e.target.value})} placeholder="Contraseña inicial" className="bg-slate-800 p-2 rounded border border-slate-700" required />
+                                            <input type="number" value={newBiz.rate} onChange={(e) => setNewBiz({...newBiz, rate: e.target.value})} placeholder="Comisión (%)" className="bg-slate-800 p-2 rounded border border-slate-700" />
+                                            <button type="submit" className="bg-green-500 text-white py-2 rounded font-bold col-span-full">Crear Negocio</button>
+                                        </form>
+                                    </div>
+                                )}
+                                <h3 className="text-lg font-bold mb-4">Negocios Activos ({businesses.length})</h3>
+                                <div className="space-y-4">
+                                    {businesses.map(b => {
+                                        const rate = b.commissionRate || 0.05;
+                                        return (
+                                            <div key={b.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <h4 className="text-lg font-bold">{b.name} <span className="text-slate-500 text-xs">({b.id})</span></h4>
+                                                    <span className="text-xs bg-red-900/50 text-red-400 px-2 py-1 rounded">Comisión: {(rate*100).toFixed(0)}%</span>
+                                                </div>
+                                                <div className="text-sm text-slate-400 mb-3">
+                                                    <p>Contraseña Admin: {b.adminPassword}</p>
+                                                </div>
+                                                <div className="flex flex-col md:flex-row gap-2 text-xs border-t border-slate-800 pt-4">
+                                                    <a href={`#/store/${b.id}`} target="_blank" className="bg-blue-600 text-white px-3 py-2 rounded font-bold text-center flex-1">Ver Tienda</a>
+                                                    <a href={`#/admin/${b.id}`} target="_blank" className="bg-slate-700 text-white px-3 py-2 rounded font-bold text-center flex-1">Panel Admin</a>
+                                                    <button onClick={() => resetBusiness(b.id)} className="bg-yellow-600 text-white px-3 py-2 rounded font-bold text-center flex-1">Resetear</button>
+                                                    <button onClick={() => deleteBusiness(b.id)} className="bg-red-800 text-white px-3 py-2 rounded font-bold text-center flex-1">Eliminar</button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </>
+                        )}
+
+                        {tab === 'pagos' && (
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-bold text-red-500 mb-4">Pagos de Comisión Pendientes</h3>
+                                {allPayments.filter(p => p.status === 'Pendiente').length === 0 && <p className="text-slate-500">No hay pagos pendientes.</p>}
+                                {allPayments.filter(p => p.status === 'Pendiente').map(pay => (
+                                    <div key={pay.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between gap-3">
+                                        <div className="flex items-center gap-4">
+                                            <button onClick={() => setModalReceipt(pay.receipt)} className="bg-slate-800 p-2 rounded-lg text-blue-400 text-xs hover:bg-slate-700">👁️ Ver</button>
+                                            <div>
+                                                <p className="text-white text-sm font-bold">{pay.bizName}</p>
+                                                <p className="text-white text-sm">S/ {Number(pay.amountPaid).toFixed(2)}</p>
+                                                <p className="text-slate-400 text-xs">{pay.paymentDate}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => approvePayment(pay.bizId, pay.id)} className="bg-green-500 text-white px-4 py-2 rounded font-bold text-sm flex-1">Aprobar</button>
+                                            <button onClick={() => rejectPayment(pay.bizId, pay.id)} className="bg-red-600 text-white px-4 py-2 rounded font-bold text-sm flex-1">Rechazar</button>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         )}
 
-                        <h3 className="text-lg font-bold mb-4">Negociios Activos ({businesses.length})</h3>
-                        <div className="space-y-4">
-                            {businesses.map(b => {
-                                const rate = b.commissionRate || 0.05;
-                                return (
-                                    <div key={b.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <h4 className="text-lg font-bold">{b.name} <span className="text-slate-500 text-xs">({b.id})</span></h4>
-                                            <span className="text-xs bg-red-900/50 text-red-400 px-2 py-1 rounded">Comisión: {(rate*100).toFixed(0)}%</span>
-                                        </div>
-                                        <div className="flex flex-col md:flex-row gap-2 text-xs mt-4 border-t border-slate-800 pt-4">
-                                            <a href={`#/store/${b.id}`} target="_blank" className="bg-blue-600 text-white px-3 py-2 rounded font-bold text-center flex-1">Ver Tienda</a>
-                                            <a href={`#/admin/${b.id}`} target="_blank" className="bg-slate-700 text-white px-3 py-2 rounded font-bold text-center flex-1">Panel Admin</a>
-                                        </div>
+                        {tab === 'config' && (
+                            <div className="bg-slate-900 p-4 rounded-xl border border-red-500/30">
+                                <h3 className="text-lg font-bold text-white mb-4">Configuración de Cobro (Para todos los negocios)</h3>
+                                <form onSubmit={saveSuperadminConfig} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="flex flex-col items-center justify-center bg-slate-950 p-4 rounded-lg">
+                                        <img src={editYapeQR || "https://via.placeholder.com/150"} alt="QR Actual" className="w-32 h-32 mb-2 rounded object-cover" />
+                                        <label className="text-[10px] text-red-400 cursor-pointer hover:underline mt-1">
+                                            Cambiar mi QR de Yape
+                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setEditYapeQR(src))} />
+                                        </label>
                                     </div>
-                                );
-                            })}
-                        </div>
+                                    <div className="flex flex-col gap-2">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-400 block mb-1">Mi Número de Yape</label>
+                                            <input type="text" value={editYapeNumber} onChange={(e) => setEditYapeNumber(e.target.value)} placeholder="Ej: 999 111 222" className="w-full p-2 rounded-lg border border-slate-800 bg-slate-950 text-white text-sm" />
+                                        </div>
+                                        <button type="submit" className="bg-red-500 text-white py-2 rounded-lg font-bold mt-2">Guardar Mi Configuración</button>
+                                    </div>
+                                </form>
+                            </div>
+                        )}
                     </div>
                 </div>
             );
