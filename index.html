@@ -97,7 +97,7 @@
         function ClientApp({ businessId }) {
             const [business, setBusiness] = useState(null);
             const [products, setProducts] = useState([]);
-            const [clientConfig, setClientConfig] = useState({ yapeNumber: '', yapeQR: '' });
+            const [clientConfig, setClientConfig] = useState({ walletName: 'Yape', walletNumber: '', walletQR: '' });
             const [loading, setLoading] = useState(true);
             
             const [cart, setCart] = useState([]);
@@ -138,17 +138,17 @@
             const totalQty = cart.reduce((sum, item) => sum + item.qty, 0);
             const totalPrice = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
 
-            const copyYapeNumber = () => {
-                if(clientConfig.yapeNumber) {
-                    navigator.clipboard.writeText(clientConfig.yapeNumber.replace(/\s/g, ''));
-                    alert("¡Número copiado! Ábrelo en tu app de Yape.");
+            const copyWalletNumber = () => {
+                if(clientConfig.walletNumber) {
+                    navigator.clipboard.writeText(clientConfig.walletNumber.replace(/\s/g, ''));
+                    alert(`¡Número copiado! Ábrelo en tu app de ${clientConfig.walletName || 'Yape'}.`);
                 }
             };
 
             const confirmOrder = async () => {
                 setError('');
                 if(!clientName || !location || !receipt) {
-                    setError("⚠️ Falta tu nombre, la ubicación o el comprobante de Yape.");
+                    setError("⚠️ Falta tu nombre, la ubicación o el comprobante de pago.");
                     return;
                 }
                 setLoadingOrder(true);
@@ -279,10 +279,10 @@
                                         </div>
                                         {error && <div className="bg-red-900/50 border border-red-500 text-red-300 text-sm p-2 rounded mb-4">{error}</div>}
                                         <div className="mb-4">
-                                            <label className="block text-xs font-bold text-slate-400 mb-1">1. Paga a este Yape</label>
+                                            <label className="block text-xs font-bold text-slate-400 mb-1">1. Paga a este {clientConfig.walletName || 'Yape'}</label>
                                             <div className="bg-slate-900 p-3 rounded-xl flex flex-col items-center border border-slate-700">
-                                                {clientConfig.yapeQR ? <img src={clientConfig.yapeQR} alt="QR Yape" className="w-32 h-32 mb-2 rounded object-cover" /> : <p className="text-slate-500 text-xs my-4">El vendedor no ha configurado su QR.</p>}
-                                                {clientConfig.yapeNumber && <button onClick={copyYapeNumber} className="bg-slate-700 text-green-400 text-sm font-bold px-3 py-2 rounded-lg hover:bg-slate-600 w-full flex items-center justify-center gap-2"><span>{clientConfig.yapeNumber}</span> 📋</button>}
+                                                {clientConfig.walletQR ? <img src={clientConfig.walletQR} alt="QR Pago" className="w-32 h-32 mb-2 rounded object-cover" /> : <p className="text-slate-500 text-xs my-4">El vendedor no ha configurado su QR.</p>}
+                                                {clientConfig.walletNumber && <button onClick={copyWalletNumber} className="bg-slate-700 text-green-400 text-sm font-bold px-3 py-2 rounded-lg hover:bg-slate-600 w-full flex items-center justify-center gap-2"><span>{clientConfig.walletNumber}</span> 📋</button>}
                                             </div>
                                         </div>
                                         <div className="mb-4">
@@ -331,8 +331,9 @@
             const [commRef, setCommRef] = useState('');
             const [newPass, setNewPass] = useState('');
 
-            const [editYapeNumber, setEditYapeNumber] = useState('');
-            const [editYapeQR, setEditYapeQR] = useState('');
+            const [editWalletName, setEditWalletName] = useState('Yape');
+            const [editWalletNumber, setEditWalletNumber] = useState('');
+            const [editWalletQR, setEditWalletQR] = useState('');
 
             const bRef = db.collection('businesses').doc(businessId);
 
@@ -341,12 +342,18 @@
                     if (doc.exists) {
                         const bData = doc.data();
                         setBusiness(bData);
-                        setEditYapeNumber(bData.yapeNumber || '');
-                        setEditYapeQR(bData.yapeQR || '');
                     }
                 });
                 bRef.collection('products').orderBy('order', 'asc').onSnapshot(snap => setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
                 db.collection('platform_config').doc('superadmin_payment').onSnapshot(doc => { if(doc.exists) setSuperadminConfig(doc.data()) });
+                
+                bRef.collection('config').doc('client_payment').onSnapshot(doc => {
+                    if(doc.exists) {
+                        setEditWalletName(doc.data().walletName || 'Yape');
+                        setEditWalletNumber(doc.data().walletNumber || '');
+                        setEditWalletQR(doc.data().walletQR || '');
+                    }
+                });
             }, [businessId]);
 
             useEffect(() => {
@@ -381,7 +388,11 @@
 
             const saveClientConfig = async (e) => {
                 e.preventDefault();
-                await bRef.update({ yapeNumber: editYapeNumber, yapeQR: editYapeQR });
+                await bRef.collection('config').doc('client_payment').set({
+                    walletName: editWalletName,
+                    walletNumber: editWalletNumber,
+                    walletQR: editWalletQR
+                });
                 alert("Configuración de pago guardada.");
             };
 
@@ -538,8 +549,8 @@
                                     <h3 className="text-lg font-bold text-white mb-4">Declarar Pago</h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="flex flex-col items-center justify-center bg-slate-900 p-4 rounded-lg">
-                                            {superadminConfig.yapeQR ? <img src={superadminConfig.yapeQR} alt="QR" className="w-32 h-32 mb-2 rounded object-cover" /> : <p className="text-slate-500 text-sm my-4">Superadmin no ha configurado QR.</p>}
-                                            {superadminConfig.yapeNumber && <p className="text-green-400 font-bold">{superadminConfig.yapeNumber}</p>}
+                                            {superadminConfig.walletQR ? <img src={superadminConfig.walletQR} alt="QR" className="w-32 h-32 mb-2 rounded object-cover" /> : <p className="text-slate-500 text-sm my-4">Superadmin no ha configurado QR.</p>}
+                                            {superadminConfig.walletNumber && <p className="text-green-400 font-bold">{superadminConfig.walletNumber}</p>}
                                         </div>
                                         <form onSubmit={submitPayment} className="flex flex-col gap-2">
                                             <input type="number" value={commAmount} onChange={(e) => setCommAmount(e.target.value)} placeholder="Monto Pagado (S/) *" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm" required />
@@ -569,13 +580,14 @@
                         {tab === 'tienda' && (
                             <div className="space-y-6">
                                 <div className="bg-slate-800 p-4 rounded-xl">
-                                    <h3 className="text-lg font-bold text-white mb-4">Configuración de Yape</h3>
-                                    <input type="text" value={editYapeNumber} onChange={(e) => setEditYapeNumber(e.target.value)} placeholder="Número Yape" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm mb-2" />
+                                    <h3 className="text-lg font-bold text-white mb-4">Configuración de Cobro</h3>
+                                    <input type="text" value={editWalletName} onChange={(e) => setEditWalletName(e.target.value)} placeholder="Nombre de Billetera (Yape, Plin, etc.)" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm mb-2" />
+                                    <input type="text" value={editWalletNumber} onChange={(e) => setEditWalletNumber(e.target.value)} placeholder="Número de Celular" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm mb-2" />
                                     <div className="flex items-center gap-4 mb-2">
-                                        <img src={editYapeQR || "https://via.placeholder.com/100"} className="w-16 h-16 rounded object-cover" alt="QR" />
-                                        <input type="file" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setEditYapeQR(src))} className="text-sm text-slate-400" />
+                                        <img src={editWalletQR || "https://via.placeholder.com/100"} className="w-16 h-16 rounded object-cover" alt="QR" />
+                                        <input type="file" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setEditWalletQR(src))} className="text-sm text-slate-400" />
                                     </div>
-                                    <button onClick={saveClientConfig} className="bg-green-500 text-white py-2 px-4 rounded-lg font-bold">Guardar Yape</button>
+                                    <button onClick={saveClientConfig} className="bg-green-500 text-white py-2 px-4 rounded-lg font-bold">Guardar Configuración</button>
                                 </div>
                                 <div className="bg-slate-800 p-4 rounded-xl">
                                     <h3 className="text-lg font-bold text-white mb-4">Cambiar Contraseña</h3>
@@ -595,18 +607,20 @@
             const [pass, setPass] = useState('');
             const [tab, setTab] = useState('negocios');
             const [businesses, setBusinesses] = useState([]);
-            const [superadminConfig, setSuperadminConfig] = useState({ yapeNumber: '', yapeQR: '' });
+            const [superadminConfig, setSuperadminConfig] = useState({ walletName: 'Yape', walletNumber: '', walletQR: '' });
             const [allPayments, setAllPayments] = useState([]);
             const [showForm, setShowForm] = useState(false);
             const [modalReceipt, setModalReceipt] = useState(null);
             const [newBiz, setNewBiz] = useState({ name: '', id: '', password: '', rate: 5 });
 
-            const [editYapeNumber, setEditYapeNumber] = useState('');
-            const [editYapeQR, setEditYapeQR] = useState('');
+            const [editWalletName, setEditWalletName] = useState('Yape');
+            const [editWalletNumber, setEditWalletNumber] = useState('');
+            const [editWalletQR, setEditWalletQR] = useState('');
 
             useEffect(() => {
-                setEditYapeNumber(superadminConfig.yapeNumber || '');
-                setEditYapeQR(superadminConfig.yapeQR || '');
+                setEditWalletName(superadminConfig.walletName || 'Yape');
+                setEditWalletNumber(superadminConfig.walletNumber || '');
+                setEditWalletQR(superadminConfig.walletQR || '');
             }, [superadminConfig]);
 
             useEffect(() => {
@@ -689,7 +703,11 @@
 
             const saveSuperadminConfig = async (e) => {
                 e.preventDefault();
-                await db.collection('platform_config').doc('superadmin_payment').set({ yapeNumber: editYapeNumber, yapeQR: editYapeQR });
+                await db.collection('platform_config').doc('superadmin_payment').set({ 
+                    walletName: editWalletName, 
+                    walletNumber: editWalletNumber, 
+                    walletQR: editWalletQR 
+                });
                 alert("Configuración de cobro guardada.");
             };
 
@@ -795,16 +813,20 @@
                                 <h3 className="text-lg font-bold text-white mb-4">Configuración de Cobro (Para todos los negocios)</h3>
                                 <form onSubmit={saveSuperadminConfig} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="flex flex-col items-center justify-center bg-slate-950 p-4 rounded-lg">
-                                        <img src={editYapeQR || "https://via.placeholder.com/150"} alt="QR Actual" className="w-32 h-32 mb-2 rounded object-cover" />
+                                        <img src={editWalletQR || "https://via.placeholder.com/150"} alt="QR Actual" className="w-32 h-32 mb-2 rounded object-cover" />
                                         <label className="text-[10px] text-red-400 cursor-pointer hover:underline mt-1">
-                                            Cambiar mi QR de Yape
-                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setEditYapeQR(src))} />
+                                            Cambiar mi QR
+                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setEditWalletQR(src))} />
                                         </label>
                                     </div>
                                     <div className="flex flex-col gap-2">
                                         <div>
-                                            <label className="text-xs font-bold text-slate-400 block mb-1">Mi Número de Yape</label>
-                                            <input type="text" value={editYapeNumber} onChange={(e) => setEditYapeNumber(e.target.value)} placeholder="Ej: 999 111 222" className="w-full p-2 rounded-lg border border-slate-800 bg-slate-950 text-white text-sm" />
+                                            <label className="text-xs font-bold text-slate-400 block mb-1">Nombre de Billetera (Yape, Plin, etc.)</label>
+                                            <input type="text" value={editWalletName} onChange={(e) => setEditWalletName(e.target.value)} placeholder="Ej: Yape" className="w-full p-2 rounded-lg border border-slate-800 bg-slate-950 text-white text-sm" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-400 block mb-1">Mi Número de Celular</label>
+                                            <input type="text" value={editWalletNumber} onChange={(e) => setEditWalletNumber(e.target.value)} placeholder="Ej: 999 111 222" className="w-full p-2 rounded-lg border border-slate-800 bg-slate-950 text-white text-sm" />
                                         </div>
                                         <button type="submit" className="bg-red-500 text-white py-2 rounded-lg font-bold mt-2">Guardar Mi Configuración</button>
                                     </div>
