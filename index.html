@@ -162,6 +162,7 @@
                         status: "Recibido",
                         location: location,
                         receipt: receipt,
+                        commissionAmount: totalPrice * (business.commissionRate || 0.05), // Congela la comisión histórica
                         createdAt: Date.now()
                     };
                     
@@ -188,8 +189,8 @@
             if(view === 'success' && lastOrderInfo) {
                 return (
                     <div className="max-w-md mx-auto p-8 text-center bg-slate-900 min-h-screen flex flex-col justify-center">
-                        <h2 className="text-3xl font-display font-bold text-green-400 mb-2">¡DESPACHADO! 🛒</h2>
-                        <p className="text-slate-300 mb-6">{business.name} recibió tu pedido.</p>
+                        <h2 className="text-3xl font-display font-bold text-green-400 mb-2">¡RECIBIDO! 🛒</h2>
+                        <p className="text-slate-300 mb-6">{business.name} está preparando tu pedido.</p>
                         <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 mb-6 text-left">
                             <p className="text-center text-green-400 font-display text-xl font-bold mb-4">CÓDIGO: {lastOrderInfo.code}</p>
                             <div className="border-t border-slate-700 pt-3 space-y-1">
@@ -199,12 +200,12 @@
                             </div>
                         </div>
                         <button onClick={() => { setView('home'); setLastOrderInfo(null); }} className="bg-green-500 text-white py-3 px-8 rounded-xl font-bold hover:bg-green-400 mb-2">Volver a la Tienda</button>
-                        <a href={`#/admin/${businessId}`} className="text-sm text-slate-500 underline">Soy el Vendedor</a>
                     </div>
                 );
             }
 
             const availableProducts = products.filter(p => p.stock > 0);
+            const cleanWalletNumber = (clientConfig.walletNumber || '').replace(/\D/g, '');
 
             return (
                 <div className="max-w-md mx-auto bg-slate-800 min-h-screen relative pb-28 border-x border-slate-700">
@@ -213,8 +214,11 @@
                             <h1 className="text-xl font-display font-bold tracking-wider text-green-400">{business.name.toUpperCase()}</h1>
                             <p className="text-[10px] text-slate-500 tracking-widest">MARKETPLACE VIRTUAL</p>
                         </div>
-                        <div className="bg-green-900/40 border border-green-500 px-3 py-1 rounded-lg">
-                            <span className="text-green-400 text-sm font-bold">🛒 {totalQty}</span>
+                        <div className="flex items-center gap-3">
+                            <a href={`#/admin/${businessId}`} className="text-slate-600 text-xs hover:text-slate-400">⚙️</a>
+                            <div className="bg-green-900/40 border border-green-500 px-3 py-1 rounded-lg">
+                                <span className="text-green-400 text-sm font-bold">🛒 {totalQty}</span>
+                            </div>
                         </div>
                     </header>
 
@@ -247,6 +251,13 @@
                             </div>
                         )}
                     </div>
+
+                    {/* Botón Flotante WhatsApp */}
+                    {cleanWalletNumber && (
+                        <a href={`https://wa.me/51${cleanWalletNumber}`} target="_blank" className="fixed bottom-24 right-4 bg-green-600 text-white p-3 rounded-full shadow-lg z-30 hover:bg-green-700">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                        </a>
+                    )}
 
                     {view === 'checkout' && (
                         <div className="fixed inset-0 bg-black bg-opacity-80 flex items-end justify-center z-50">
@@ -335,6 +346,9 @@
             const [editWalletNumber, setEditWalletNumber] = useState('');
             const [editWalletQR, setEditWalletQR] = useState('');
 
+            const [rejectedPayId, setRejectedPayId] = useState(null);
+            const [newReceipt, setNewReceipt] = useState(null);
+
             const bRef = db.collection('businesses').doc(businessId);
 
             useEffect(() => {
@@ -412,6 +426,14 @@
                 alert("Comprobante enviado al administrador.");
             };
 
+            const resendReceipt = async (payId) => {
+                if(!newReceipt) { alert("Sube un nuevo comprobante."); return; }
+                await bRef.collection('payments').doc(payId).update({ receipt: newReceipt, status: "Pendiente" });
+                setRejectedPayId(null);
+                setNewReceipt(null);
+                alert("Comprobante reenviado.");
+            };
+
             if (!business) return <div className="min-h-screen flex items-center justify-center text-red-400">Cargando negocio...</div>;
 
             if (!auth) {
@@ -428,23 +450,31 @@
                 );
             }
 
-            const rate = business.commissionRate || 0.05;
             const validOrders = orders.filter(o => o.status !== "Anulado");
             const totalSalesAllTime = validOrders.filter(o => o.status === "Entregado").reduce((sum, o) => sum + o.total, 0);
-            const totalCommissionAllTime = totalSalesAllTime * rate;
+            const totalCommissionAllTime = validOrders.filter(o => o.status === "Entregado").reduce((sum, o) => sum + (o.commissionAmount || 0), 0);
             const totalPaid = payments.filter(p => p.status === "Aprobado").reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
             const currentDebt = totalCommissionAllTime - totalPaid;
 
             const filteredOrders = orders.filter(o => JSON.stringify(o).toLowerCase().includes(searchTerm.toLowerCase()));
+            const supportNumber = (superadminConfig.supportWhatsApp || '').replace(/\D/g, '');
 
             return (
-                <div className="min-h-screen bg-slate-900 font-inter p-4">
+                <div className="min-h-screen bg-slate-900 font-inter p-4 relative">
                     {modalReceipt && (
                         <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4" onClick={() => setModalReceipt(null)}>
                             <img src={modalReceipt} className="max-w-full max-h-full rounded-lg" alt="Comprobante" />
                             <button className="absolute top-4 right-4 text-white text-4xl">&times;</button>
                         </div>
                     )}
+
+                    {/* Botón Flotante Soporte */}
+                    {supportNumber && (
+                        <a href={`https://wa.me/51${supportNumber}?text=Hola%2C%20necesito%20soporte%20con%20mi%20negocio%20${business.name}`} target="_blank" className="fixed bottom-4 right-4 bg-blue-600 text-white p-3 rounded-full shadow-lg z-30 hover:bg-blue-700">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                        </a>
+                    )}
+
                     <div className="max-w-4xl mx-auto">
                         <div className="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
                             <div>
@@ -468,7 +498,7 @@
                                         <p className="text-xl font-bold text-white">S/ {totalSalesAllTime.toFixed(2)}</p>
                                     </div>
                                     <div className="bg-slate-800 p-4 rounded-xl border border-red-500/30">
-                                        <p className="text-slate-400 text-xs">Comisión Pendiente ({(rate*100).toFixed(0)}%)</p>
+                                        <p className="text-slate-400 text-xs">Comisión Pendiente</p>
                                         <p className="text-xl font-bold text-red-400">S/ {currentDebt.toFixed(2)}</p>
                                     </div>
                                     <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-center">
@@ -563,15 +593,30 @@
                                 </div>
                                 <h3 className="text-lg font-bold text-white mb-4">Historial</h3>
                                 {payments.map(pay => (
-                                    <div key={pay.id} className="bg-slate-800 p-3 rounded-xl border-l-4 border-blue-500 mb-2 flex justify-between items-center">
-                                        <div>
-                                            <p className="text-white text-sm font-bold">S/ {pay.amountPaid} - {pay.paymentDate}</p>
-                                            <p className="text-slate-400 text-xs">{pay.reference || 'Sin ref'}</p>
+                                    <div key={pay.id} className="bg-slate-800 p-3 rounded-xl border-l-4 border-blue-500 mb-2 flex flex-col">
+                                        <div className="flex justify-between items-center w-full">
+                                            <div>
+                                                <p className="text-white text-sm font-bold">S/ {pay.amountPaid} - {pay.paymentDate}</p>
+                                                <p className="text-slate-400 text-xs">{pay.reference || 'Sin ref'}</p>
+                                            </div>
+                                            <div className="flex gap-2 items-center">
+                                                <span className={`text-xs font-bold ${pay.status === 'Pendiente' ? 'text-yellow-400' : pay.status === 'Rechazado' ? 'text-red-400' : 'text-green-400'}`}>{pay.status}</span>
+                                                <button onClick={() => setModalReceipt(pay.receipt)} className="text-xs bg-slate-700 text-white px-2 py-1 rounded">👁️</button>
+                                            </div>
                                         </div>
-                                        <div className="flex gap-2 items-center">
-                                            <span className={`text-xs font-bold ${pay.status === 'Pendiente' ? 'text-yellow-400' : pay.status === 'Rechazado' ? 'text-red-400' : 'text-green-400'}`}>{pay.status}</span>
-                                            <button onClick={() => setModalReceipt(pay.receipt)} className="text-xs bg-slate-700 text-white px-2 py-1 rounded">👁️</button>
-                                        </div>
+                                        {pay.status === 'Rechazado' && (
+                                            <div className="mt-3 bg-red-900/20 p-3 rounded-lg">
+                                                <p className="text-red-400 text-xs mb-2">⚠️ Pago rechazado. Contáctate con soporte o vuelve a adjuntar el recibo correcto.</p>
+                                                {rejectedPayId === pay.id ? (
+                                                    <div className="flex gap-2">
+                                                        <input type="file" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setNewReceipt(src))} className="text-xs text-slate-400 w-full" />
+                                                        <button onClick={() => resendReceipt(pay.id)} className="bg-green-500 text-white text-xs px-3 py-1 rounded font-bold">Reenviar</button>
+                                                    </div>
+                                                ) : (
+                                                    <button onClick={() => setRejectedPayId(pay.id)} className="bg-blue-600 text-white text-xs px-3 py-1 rounded font-bold">Subir nuevo recibo</button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                             </div>
@@ -607,7 +652,7 @@
             const [pass, setPass] = useState('');
             const [tab, setTab] = useState('negocios');
             const [businesses, setBusinesses] = useState([]);
-            const [superadminConfig, setSuperadminConfig] = useState({ walletName: 'Yape', walletNumber: '', walletQR: '' });
+            const [superadminConfig, setSuperadminConfig] = useState({ walletName: 'Yape', walletNumber: '', walletQR: '', supportWhatsApp: '' });
             const [allPayments, setAllPayments] = useState([]);
             const [showForm, setShowForm] = useState(false);
             const [modalReceipt, setModalReceipt] = useState(null);
@@ -616,11 +661,13 @@
             const [editWalletName, setEditWalletName] = useState('Yape');
             const [editWalletNumber, setEditWalletNumber] = useState('');
             const [editWalletQR, setEditWalletQR] = useState('');
+            const [editSupportWhatsApp, setEditSupportWhatsApp] = useState('');
 
             useEffect(() => {
                 setEditWalletName(superadminConfig.walletName || 'Yape');
                 setEditWalletNumber(superadminConfig.walletNumber || '');
                 setEditWalletQR(superadminConfig.walletQR || '');
+                setEditSupportWhatsApp(superadminConfig.supportWhatsApp || '');
             }, [superadminConfig]);
 
             useEffect(() => {
@@ -679,6 +726,11 @@
             const approvePayment = async (bId, payId) => { await db.collection('businesses').doc(bId).collection('payments').doc(payId).update({ status: "Aprobado" }); };
             const rejectPayment = async (bId, payId) => { await db.collection('businesses').doc(bId).collection('payments').doc(payId).update({ status: "Rechazado" }); };
 
+            const updateBizRate = async (bId, rate) => {
+                await db.collection('businesses').doc(bId).update({ commissionRate: parseFloat(rate)/100 });
+                alert("Comisión actualizada para futuros pedidos.");
+            };
+
             const resetBusiness = async (bId) => {
                 if(!confirm(`⚠️ ¿Borrar pedidos y pagos de ${bId}?`)) return;
                 const bRef = db.collection('businesses').doc(bId);
@@ -706,7 +758,8 @@
                 await db.collection('platform_config').doc('superadmin_payment').set({ 
                     walletName: editWalletName, 
                     walletNumber: editWalletNumber, 
-                    walletQR: editWalletQR 
+                    walletQR: editWalletQR,
+                    supportWhatsApp: editSupportWhatsApp
                 });
                 alert("Configuración de cobro guardada.");
             };
@@ -767,7 +820,7 @@
                                             <div key={b.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800">
                                                 <div className="flex justify-between items-center mb-2">
                                                     <h4 className="text-lg font-bold">{b.name} <span className="text-slate-500 text-xs">({b.id})</span></h4>
-                                                    <span className="text-xs bg-red-900/50 text-red-400 px-2 py-1 rounded">Comisión: {(rate*100).toFixed(0)}%</span>
+                                                    <input type="number" defaultValue={(rate*100).toFixed(0)} onBlur={(e) => updateBizRate(b.id, e.target.value)} className="w-16 bg-slate-800 text-white text-xs p-1 rounded border border-slate-700 text-center" title="Comisión (%)"/>
                                                 </div>
                                                 <div className="text-sm text-slate-400 mb-3">
                                                     <p>Contraseña Admin: {b.adminPassword}</p>
@@ -810,7 +863,7 @@
 
                         {tab === 'config' && (
                             <div className="bg-slate-900 p-4 rounded-xl border border-red-500/30">
-                                <h3 className="text-lg font-bold text-white mb-4">Configuración de Cobro (Para todos los negocios)</h3>
+                                <h3 className="text-lg font-bold text-white mb-4">Configuración de Cobro y Soporte</h3>
                                 <form onSubmit={saveSuperadminConfig} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="flex flex-col items-center justify-center bg-slate-950 p-4 rounded-lg">
                                         <img src={editWalletQR || "https://via.placeholder.com/150"} alt="QR Actual" className="w-32 h-32 mb-2 rounded object-cover" />
@@ -827,6 +880,10 @@
                                         <div>
                                             <label className="text-xs font-bold text-slate-400 block mb-1">Mi Número de Celular</label>
                                             <input type="text" value={editWalletNumber} onChange={(e) => setEditWalletNumber(e.target.value)} placeholder="Ej: 999 111 222" className="w-full p-2 rounded-lg border border-slate-800 bg-slate-950 text-white text-sm" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-400 block mb-1">WhatsApp de Soporte (Para los negocios)</label>
+                                            <input type="text" value={editSupportWhatsApp} onChange={(e) => setEditSupportWhatsApp(e.target.value)} placeholder="Ej: 999 888 777" className="w-full p-2 rounded-lg border border-slate-800 bg-slate-950 text-white text-sm" />
                                         </div>
                                         <button type="submit" className="bg-red-500 text-white py-2 rounded-lg font-bold mt-2">Guardar Mi Configuración</button>
                                     </div>
