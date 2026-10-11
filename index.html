@@ -346,9 +346,6 @@
             const [editWalletNumber, setEditWalletNumber] = useState('');
             const [editWalletQR, setEditWalletQR] = useState('');
 
-            const [rejectedPayId, setRejectedPayId] = useState(null);
-            const [newReceipt, setNewReceipt] = useState(null);
-
             const bRef = db.collection('businesses').doc(businessId);
 
             useEffect(() => {
@@ -424,14 +421,6 @@
                 await bRef.collection('payments').add({ receipt: commReceipt, amountPaid: parseFloat(commAmount), paymentDate: commDate, reference: commRef, status: "Pendiente", createdAt: Date.now() });
                 setCommReceipt(null); setCommAmount(''); setCommDate(''); setCommRef('');
                 alert("Comprobante enviado al administrador.");
-            };
-
-            const resendReceipt = async (payId) => {
-                if(!newReceipt) { alert("Sube un nuevo comprobante."); return; }
-                await bRef.collection('payments').doc(payId).update({ receipt: newReceipt, status: "Pendiente" });
-                setRejectedPayId(null);
-                setNewReceipt(null);
-                alert("Comprobante reenviado.");
             };
 
             if (!business) return <div className="min-h-screen flex items-center justify-center text-red-400">Cargando negocio...</div>;
@@ -606,15 +595,7 @@
                                         </div>
                                         {pay.status === 'Rechazado' && (
                                             <div className="mt-3 bg-red-900/20 p-3 rounded-lg">
-                                                <p className="text-red-400 text-xs mb-2">⚠️ Pago rechazado. Contáctate con soporte o vuelve a adjuntar el recibo correcto.</p>
-                                                {rejectedPayId === pay.id ? (
-                                                    <div className="flex gap-2">
-                                                        <input type="file" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setNewReceipt(src))} className="text-xs text-slate-400 w-full" />
-                                                        <button onClick={() => resendReceipt(pay.id)} className="bg-green-500 text-white text-xs px-3 py-1 rounded font-bold">Reenviar</button>
-                                                    </div>
-                                                ) : (
-                                                    <button onClick={() => setRejectedPayId(pay.id)} className="bg-blue-600 text-white text-xs px-3 py-1 rounded font-bold">Subir nuevo recibo</button>
-                                                )}
+                                                <p className="text-red-400 text-xs">⚠️ Pago rechazado. Contáctate con soporte o declara un nuevo pago arriba.</p>
                                             </div>
                                         )}
                                     </div>
@@ -654,6 +635,7 @@
             const [businesses, setBusinesses] = useState([]);
             const [superadminConfig, setSuperadminConfig] = useState({ walletName: 'Yape', walletNumber: '', walletQR: '', supportWhatsApp: '' });
             const [allPayments, setAllPayments] = useState([]);
+            const [allOrders, setAllOrders] = useState([]);
             const [showForm, setShowForm] = useState(false);
             const [modalReceipt, setModalReceipt] = useState(null);
             const [newBiz, setNewBiz] = useState({ name: '', id: '', password: '', rate: 5 });
@@ -682,14 +664,20 @@
             useEffect(() => {
                 if (auth && businesses.length > 0) {
                     let tempPayments = [];
+                    let tempOrders = [];
                     let promises = businesses.map(b => {
                         return db.collection('businesses').doc(b.id).collection('payments').get().then(snap => {
                             snap.docs.forEach(d => tempPayments.push({ id: d.id, bizId: b.id, bizName: b.name, ...d.data() }));
+                        }).then(() => {
+                            return db.collection('businesses').doc(b.id).collection('orders').get().then(snap => {
+                                snap.docs.forEach(d => tempOrders.push({ id: d.id, bizId: b.id, ...d.data() }));
+                            });
                         });
                     });
                     Promise.all(promises).then(() => {
                         tempPayments.sort((a, b) => b.createdAt - a.createdAt);
                         setAllPayments(tempPayments);
+                        setAllOrders(tempOrders);
                     });
                 }
             }, [auth, businesses]);
@@ -793,7 +781,7 @@
 
                         <div className="flex gap-2 mb-6">
                             <button onClick={() => setTab('negocios')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'negocios' ? 'bg-red-500 text-white' : 'bg-slate-900 text-slate-400'}`}>Negocios</button>
-                            <button onClick={() => setTab('pagos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'pagos' ? 'bg-red-500 text-white' : 'bg-slate-900 text-slate-400'}`}>Aprobación de Pagos</button>
+                            <button onClick={() => setTab('pagos')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'pagos' ? 'bg-red-500 text-white' : 'bg-slate-900 text-slate-400'}`}>Historial de Pagos</button>
                             <button onClick={() => setTab('config')} className={`px-4 py-2 rounded-lg text-sm font-bold ${tab === 'config' ? 'bg-red-500 text-white' : 'bg-slate-900 text-slate-400'}`}>Config. Plataforma</button>
                         </div>
 
@@ -816,11 +804,29 @@
                                 <div className="space-y-4">
                                     {businesses.map(b => {
                                         const rate = b.commissionRate || 0.05;
+                                        const bOrders = allOrders.filter(o => o.bizId === b.id && o.status === 'Entregado');
+                                        const bCommission = bOrders.reduce((sum, o) => sum + (o.commissionAmount || o.total * rate), 0);
+                                        const bPaid = allPayments.filter(p => p.bizId === b.id && p.status === 'Aprobado').reduce((sum, p) => sum + p.amountPaid, 0);
+                                        const bDebt = bCommission - bPaid;
                                         return (
                                             <div key={b.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                                                <div className="flex justify-between items-center mb-2">
+                                                <div className="flex justify-between items-center mb-3">
                                                     <h4 className="text-lg font-bold">{b.name} <span className="text-slate-500 text-xs">({b.id})</span></h4>
-                                                    <input type="number" defaultValue={(rate*100).toFixed(0)} onBlur={(e) => updateBizRate(b.id, e.target.value)} className="w-16 bg-slate-800 text-white text-xs p-1 rounded border border-slate-700 text-center" title="Comisión (%)"/>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs text-slate-400">Comisión:</span>
+                                                        <input type="number" defaultValue={(rate*100).toFixed(0)} onBlur={(e) => updateBizRate(b.id, e.target.value)} className="w-12 bg-slate-800 text-white text-xs p-1 rounded border border-slate-700 text-center" title="Comisión (%)"/>
+                                                        <span className="text-xs text-slate-400">%</span>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3 mb-4">
+                                                    <div className="bg-slate-950 p-3 rounded-lg text-center">
+                                                        <p className="text-xs text-slate-400 mb-1">Comisión Generada</p>
+                                                        <p className="text-lg font-bold text-green-400">S/ {bCommission.toFixed(2)}</p>
+                                                    </div>
+                                                    <div className="bg-slate-950 p-3 rounded-lg text-center">
+                                                        <p className="text-xs text-slate-400 mb-1">Deuda Actual</p>
+                                                        <p className="text-lg font-bold text-red-400">S/ {bDebt.toFixed(2)}</p>
+                                                    </div>
                                                 </div>
                                                 <div className="text-sm text-slate-400 mb-3">
                                                     <p>Contraseña Admin: {b.adminPassword}</p>
@@ -840,9 +846,9 @@
 
                         {tab === 'pagos' && (
                             <div className="space-y-4">
-                                <h3 className="text-lg font-bold text-red-500 mb-4">Pagos de Comisión Pendientes</h3>
-                                {allPayments.filter(p => p.status === 'Pendiente').length === 0 && <p className="text-slate-500">No hay pagos pendientes.</p>}
-                                {allPayments.filter(p => p.status === 'Pendiente').map(pay => (
+                                <h3 className="text-lg font-bold text-red-500 mb-4">Historial Global de Pagos</h3>
+                                {allPayments.length === 0 && <p className="text-slate-500">No hay pagos registrados.</p>}
+                                {allPayments.map(pay => (
                                     <div key={pay.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between gap-3">
                                         <div className="flex items-center gap-4">
                                             <button onClick={() => setModalReceipt(pay.receipt)} className="bg-slate-800 p-2 rounded-lg text-blue-400 text-xs hover:bg-slate-700">👁️ Ver</button>
@@ -852,9 +858,15 @@
                                                 <p className="text-slate-400 text-xs">{pay.paymentDate}</p>
                                             </div>
                                         </div>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => approvePayment(pay.bizId, pay.id)} className="bg-green-500 text-white px-4 py-2 rounded font-bold text-sm flex-1">Aprobar</button>
-                                            <button onClick={() => rejectPayment(pay.bizId, pay.id)} className="bg-red-600 text-white px-4 py-2 rounded font-bold text-sm flex-1">Rechazar</button>
+                                        <div className="flex gap-2 items-center">
+                                            {pay.status === 'Pendiente' ? (
+                                                <>
+                                                    <button onClick={() => approvePayment(pay.bizId, pay.id)} className="bg-green-500 text-white px-4 py-2 rounded font-bold text-sm flex-1">Aprobar</button>
+                                                    <button onClick={() => rejectPayment(pay.bizId, pay.id)} className="bg-red-600 text-white px-4 py-2 rounded font-bold text-sm flex-1">Rechazar</button>
+                                                </>
+                                            ) : (
+                                                <span className={`px-4 py-2 rounded-full text-xs font-bold text-center ${pay.status === 'Aprobado' ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'}`}>{pay.status}</span>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
