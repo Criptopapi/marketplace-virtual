@@ -654,32 +654,47 @@
 
             useEffect(() => {
                 if (auth) {
-                    db.collection('businesses').onSnapshot(snap => {
+                    const unsubBiz = db.collection('businesses').onSnapshot(snap => {
                         setBusinesses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
                     });
-                    db.collection('platform_config').doc('superadmin_payment').onSnapshot(doc => { if(doc.exists) setSuperadminConfig(doc.data()) });
+                    const unsubConfig = db.collection('platform_config').doc('superadmin_payment').onSnapshot(doc => { if(doc.exists) setSuperadminConfig(doc.data()) });
+                    return () => { unsubBiz(); unsubConfig(); };
                 }
             }, [auth]);
 
             useEffect(() => {
-                if (auth && businesses.length > 0) {
-                    let tempPayments = [];
-                    let tempOrders = [];
-                    let promises = businesses.map(b => {
-                        return db.collection('businesses').doc(b.id).collection('payments').get().then(snap => {
-                            snap.docs.forEach(d => tempPayments.push({ id: d.id, bizId: b.id, bizName: b.name, ...d.data() }));
-                        }).then(() => {
-                            return db.collection('businesses').doc(b.id).collection('orders').get().then(snap => {
-                                snap.docs.forEach(d => tempOrders.push({ id: d.id, bizId: b.id, ...d.data() }));
-                            });
+                if (!auth || businesses.length === 0) {
+                    setAllPayments([]);
+                    setAllOrders([]);
+                    return;
+                }
+
+                const unsubs = [];
+                
+                businesses.forEach(b => {
+                    const unsubP = db.collection('businesses').doc(b.id).collection('payments').onSnapshot(snap => {
+                        setAllPayments(prev => {
+                            const filtered = prev.filter(p => p.bizId !== b.id);
+                            const newPayments = snap.docs.map(d => ({ id: d.id, bizId: b.id, bizName: b.name, ...d.data() }));
+                            const combined = [...filtered, ...newPayments];
+                            combined.sort((a, c) => (c.createdAt || 0) - (a.createdAt || 0));
+                            return combined;
                         });
                     });
-                    Promise.all(promises).then(() => {
-                        tempPayments.sort((a, b) => b.createdAt - a.createdAt);
-                        setAllPayments(tempPayments);
-                        setAllOrders(tempOrders);
+                    unsubs.push(unsubP);
+
+                    const unsubO = db.collection('businesses').doc(b.id).collection('orders').onSnapshot(snap => {
+                        setAllOrders(prev => {
+                            const filtered = prev.filter(o => o.bizId !== b.id);
+                            const newOrders = snap.docs.map(d => ({ id: d.id, bizId: b.id, ...d.data() }));
+                            const combined = [...filtered, ...newOrders];
+                            return combined;
+                        });
                     });
-                }
+                    unsubs.push(unsubO);
+                });
+
+                return () => unsubs.forEach(u => u && u());
             }, [auth, businesses]);
 
             const login = async (e) => {
