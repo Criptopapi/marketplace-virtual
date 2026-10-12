@@ -58,7 +58,7 @@
         };
 
         const sendTelegramMessage = async (order, businessName) => {
-            const text = `🛒 NUEVO PEDIDO - ${businessName.toUpperCase()} (Cód: ${order.code})\n\n👤 Cliente: ${order.client}\n📍 Ubicación: ${order.location}\n📦 Pedido: ${order.items}\n💰 Total: S/ ${order.total.toFixed(2)}\n\n✅ Comprobante subido en la plataforma.`;
+            const text = `🛒 NUEVO PEDIDO - ${businessName.toUpperCase()} (Cód: ${order.code})\n\n👤 Cliente: ${order.client}\n📍 Ubicación: ${order.location || 'N/A'}\n📦 Pedido: ${order.items}\n💰 Total: S/ ${order.total.toFixed(2)}\n\n✅ Comprobante subido en la plataforma.`;
             try {
                 await fetch('/api/send-telegram', {
                     method: 'POST',
@@ -79,16 +79,119 @@
             const parts = hash.replace(/^#\//, '').split('/');
             const view = parts[0];
             const businessId = parts[1];
+            const orderId = parts[2];
 
             if (view === 'superadmin') return <SuperAdminApp />;
             if (view === 'admin' && businessId) return <AdminApp businessId={businessId} />;
             if (view === 'store' && businessId) return <ClientApp businessId={businessId} />;
+            if (view === 'pay' && businessId && orderId) return <DirectPayApp businessId={businessId} orderId={orderId} />;
             
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white p-4 text-center">
                     <h1 className="text-3xl font-display font-bold text-green-400 mb-4">MARKETPLACE VIRTUAL</h1>
                     <p className="text-slate-400 mb-8">Plataforma SaaS para emprendedores.</p>
                     <a href="#/superadmin" className="bg-red-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-600">Acceso Superadmin</a>
+                </div>
+            );
+        }
+
+        // --- VISTA DE PAGO DIRECTO (LINK WHATSAPP) ---
+        function DirectPayApp({ businessId, orderId }) {
+            const [business, setBusiness] = useState(null);
+            const [order, setOrder] = useState(null);
+            const [clientConfig, setClientConfig] = useState({ walletName: 'Yape', walletNumber: '', walletQR: '' });
+            const [loading, setLoading] = useState(true);
+            const [receipt, setReceipt] = useState(null);
+            const [error, setError] = useState('');
+            const [paid, setPaid] = useState(false);
+
+            useEffect(() => {
+                const bRef = db.collection('businesses').doc(businessId);
+                bRef.get().then(doc => { if (doc.exists) setBusiness(doc.data()); });
+                bRef.collection('config').doc('client_payment').onSnapshot(doc => {
+                    if (doc.exists) setClientConfig(doc.data());
+                });
+                
+                bRef.collection('orders').doc(orderId).onSnapshot(doc => {
+                    if (doc.exists) {
+                        setOrder(doc.data());
+                        if (doc.data().status !== 'Esperando Pago') setPaid(true);
+                    }
+                    setLoading(false);
+                });
+            }, [businessId, orderId]);
+
+            const copyWalletNumber = () => {
+                if(clientConfig.walletNumber) {
+                    navigator.clipboard.writeText(clientConfig.walletNumber.replace(/\s/g, ''));
+                    alert(`¡Número copiado! Ábrelo en tu app de ${clientConfig.walletName || 'Yape'}.`);
+                }
+            };
+
+            const confirmPayment = async () => {
+                if(!receipt) { setError("⚠️ Sube el comprobante de pago."); return; }
+                try {
+                    const oRef = db.collection('businesses').doc(businessId).collection('orders').doc(orderId);
+                    const batch = db.batch();
+                    batch.update(oRef, { receipt, status: "Recibido", createdAt: Date.now() });
+                    await batch.commit();
+                    
+                    await sendTelegramMessage({...order, receipt}, business?.name || businessId);
+                    setPaid(true);
+                } catch (err) { setError("❌ Error al guardar."); }
+            };
+
+            if (loading) return <div className="min-h-screen flex items-center justify-center text-green-400 font-display">CARGANDO PEDIDO...</div>;
+            if (!order) return <div className="min-h-screen flex items-center justify-center text-red-400 font-display">PEDIDO NO ENCONTRADO</div>;
+
+            if (paid) {
+                return (
+                    <div className="max-w-md mx-auto p-8 text-center bg-slate-900 min-h-screen flex flex-col justify-center">
+                        <h2 className="text-3xl font-display font-bold text-green-400 mb-2">¡RECIBIDO! 🛒</h2>
+                        <p className="text-slate-300 mb-6">{business.name} está preparando tu pedido.</p>
+                        <div className="bg-slate-800 p-5 rounded-2xl border border-slate-700 mb-6 text-left">
+                            <p className="text-center text-green-400 font-display text-xl font-bold mb-4">CÓDIGO: {order.code}</p>
+                            <div className="border-t border-slate-700 pt-3 space-y-1">
+                                <p className="text-sm text-slate-400">Resumen:</p>
+                                <p className="text-white text-sm">{order.items}</p>
+                                <p className="text-green-400 font-bold text-lg mt-2">Total: S/ {order.total.toFixed(2)}</p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-md mx-auto bg-slate-800 min-h-screen relative pb-28 border-x border-slate-700 p-6">
+                    <header className="text-center mb-6 mt-4">
+                        <h1 className="text-xl font-display font-bold tracking-wider text-green-400">{business.name.toUpperCase()}</h1>
+                        <p className="text-[10px] text-slate-500 tracking-widest">PAGO DE PEDIDO</p>
+                    </header>
+
+                    <div className="bg-slate-700 rounded-xl p-4 mb-6">
+                        <h3 className="font-bold text-white mb-2">Resumen del Pedido</h3>
+                        <p className="text-white text-sm mb-2">{order.items}</p>
+                        <div className="flex justify-between font-display font-bold text-green-400 text-lg pt-2 border-t border-slate-600">
+                            <span>TOTAL</span><span>S/ {order.total.toFixed(2)}</span>
+                        </div>
+                    </div>
+
+                    <div className="mb-4">
+                        <label className="block text-xs font-bold text-slate-400 mb-1">1. Paga a este {clientConfig.walletName || 'Yape'}</label>
+                        <div className="bg-slate-900 p-3 rounded-xl flex flex-col items-center border border-slate-700">
+                            {clientConfig.walletQR ? <img src={clientConfig.walletQR} alt="QR Pago" className="w-32 h-32 mb-2 rounded object-cover" /> : <p className="text-slate-500 text-xs my-4">QR no configurado.</p>}
+                            {clientConfig.walletNumber && <button onClick={copyWalletNumber} className="bg-slate-700 text-green-400 text-sm font-bold px-3 py-2 rounded-lg hover:bg-slate-600 w-full flex items-center justify-center gap-2"><span>{clientConfig.walletNumber}</span> 📋</button>}
+                        </div>
+                    </div>
+                    
+                    <div className="mb-6">
+                        <label className="block text-xs font-bold text-slate-400 mb-1">2. Sube tu comprobante</label>
+                        <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && compressImage(e.target.files[0], src => setReceipt(src))} className="w-full text-sm p-2 bg-slate-900 rounded-lg border border-slate-700 text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-green-900/50 file:text-green-400" />
+                        {receipt && <img src={receipt} className="w-16 h-16 object-cover mt-2 rounded-md" alt="Comprobante" />}
+                        {error && <div className="bg-red-900/50 border border-red-500 text-red-300 text-sm p-2 rounded mt-2">{error}</div>}
+                    </div>
+
+                    <button onClick={confirmPayment} className="w-full bg-green-500 text-white py-3 rounded-xl font-display font-bold hover:bg-green-400">CONFIRMAR PAGO</button>
                 </div>
             );
         }
@@ -162,7 +265,7 @@
                         status: "Recibido",
                         location: location,
                         receipt: receipt,
-                        commissionAmount: totalPrice * (business.commissionRate || 0.05), // Congela la comisión histórica
+                        commissionAmount: totalPrice * (business.commissionRate || 0.05),
                         createdAt: Date.now()
                     };
                     
@@ -346,6 +449,10 @@
             const [editWalletNumber, setEditWalletNumber] = useState('');
             const [editWalletQR, setEditWalletQR] = useState('');
 
+            const [directCart, setDirectCart] = useState([]);
+            const [directClient, setDirectClient] = useState('');
+            const [directPayLink, setDirectPayLink] = useState('');
+
             const bRef = db.collection('businesses').doc(businessId);
 
             useEffect(() => {
@@ -423,6 +530,23 @@
                 alert("Comprobante enviado al administrador.");
             };
 
+            const addDirectCart = (p) => setDirectCart([...directCart, p]);
+            const genPayLink = async () => {
+                if(directCart.length === 0 || !directClient) { alert("Agrega productos y nombre del cliente."); return; }
+                const total = directCart.reduce((s, i) => s + i.price, 0);
+                const oRef = await bRef.collection('orders').add({
+                    code: "MP-" + Date.now().toString().slice(-6),
+                    client: directClient,
+                    items: directCart.map(p => `${p.name} (x1)`).join(", "),
+                    total: total,
+                    status: "Esperando Pago",
+                    receipt: null,
+                    createdAt: Date.now()
+                });
+                setDirectPayLink(`${window.location.origin}#/pay/${businessId}/${oRef.id}`);
+                setDirectCart([]); setDirectClient('');
+            };
+
             if (!business) return <div className="min-h-screen flex items-center justify-center text-red-400">Cargando negocio...</div>;
 
             if (!auth) {
@@ -439,9 +563,10 @@
                 );
             }
 
+            const rate = business.commissionRate || 0.05;
             const validOrders = orders.filter(o => o.status !== "Anulado");
             const totalSalesAllTime = validOrders.filter(o => o.status === "Entregado").reduce((sum, o) => sum + o.total, 0);
-            const totalCommissionAllTime = validOrders.filter(o => o.status === "Entregado").reduce((sum, o) => sum + (o.commissionAmount || 0), 0);
+            const totalCommissionAllTime = validOrders.filter(o => o.status === "Entregado").reduce((sum, o) => sum + (o.commissionAmount || o.total * rate), 0);
             const totalPaid = payments.filter(p => p.status === "Aprobado").reduce((sum, p) => sum + (Number(p.amountPaid) || 0), 0);
             const currentDebt = totalCommissionAllTime - totalPaid;
 
@@ -474,6 +599,7 @@
                         </div>
                         <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
                             <button onClick={() => setTab('pedidos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'pedidos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Pedidos</button>
+                            <button onClick={() => setTab('link')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'link' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Crear Link WhatsApp</button>
                             <button onClick={() => setTab('productos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'productos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}}`}>Productos</button>
                             <button onClick={() => setTab('pagos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'pagos' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}`}>Pagos Plataforma</button>
                             <button onClick={() => setTab('tienda')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${tab === 'tienda' ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-400'}}`}>Mi Tienda</button>
@@ -487,7 +613,7 @@
                                         <p className="text-xl font-bold text-white">S/ {totalSalesAllTime.toFixed(2)}</p>
                                     </div>
                                     <div className="bg-slate-800 p-4 rounded-xl border border-red-500/30">
-                                        <p className="text-slate-400 text-xs">Comisión Pendiente</p>
+                                        <p className="text-slate-400 text-xs">Comisión Pendiente ({(rate*100).toFixed(0)}%)</p>
                                         <p className="text-xl font-bold text-red-400">S/ {currentDebt.toFixed(2)}</p>
                                     </div>
                                     <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-center">
@@ -511,7 +637,6 @@
                                                 <p className="font-bold text-white text-sm">👤 {order.client}</p>
                                                 <p className="text-white text-sm">{order.items}</p>
                                                 <p className="text-green-400 text-sm font-semibold mb-2">Total: S/ {order.total.toFixed(2)}</p>
-                                                <p className="text-xs text-slate-400">📍 {order.location}</p>
                                                 <button onClick={() => setModalReceipt(order.receipt)} className="inline-block mt-2 text-xs bg-slate-700 text-white px-2 py-1 rounded">👁️ Ver</button>
                                             </div>
                                             <div className="text-right flex flex-col gap-1 w-24">
@@ -524,6 +649,39 @@
                                     ))}
                                 </div>
                             </>
+                        )}
+
+                        {tab === 'link' && (
+                            <div className="bg-slate-800 p-4 rounded-xl">
+                                <h3 className="text-lg font-bold text-white mb-4">Crear Link de Pago Directo</h3>
+                                <p className="text-slate-400 text-xs mb-4">Arma el pedido del cliente y envíale el link por WhatsApp. Él solo subirá el comprobante.</p>
+                                <input type="text" value={directClient} onChange={(e) => setDirectClient(e.target.value)} placeholder="Nombre del Cliente" className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-white text-sm mb-4" />
+                                <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                                    {products.map(p => (
+                                        <div key={p.id} className="bg-slate-900 p-2 rounded-lg flex justify-between items-center border border-slate-700">
+                                            <span className="text-white text-sm">{p.name} - S/ {p.price.toFixed(2)}</span>
+                                            <button onClick={() => addDirectCart(p)} className="bg-green-500 text-white px-2 py-1 rounded text-xs font-bold">+ Agregar</button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="bg-slate-900 p-3 rounded-lg mb-4">
+                                    <h4 className="text-white text-sm font-bold mb-2">Pedido Actual:</h4>
+                                    {directCart.length === 0 ? <p className="text-slate-500 text-xs">Vacío</p> : directCart.map((p, i) => (
+                                        <div key={i} className="text-white text-xs flex justify-between">
+                                            <span>{p.name}</span>
+                                            <span>S/ {p.price.toFixed(2)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button onClick={genPayLink} className="w-full bg-green-500 text-white py-2 rounded-lg font-bold mb-4">Generar Link</button>
+                                {directPayLink && (
+                                    <div className="bg-slate-900 p-3 rounded-lg border border-green-500 mt-2">
+                                        <p className="text-green-400 text-xs font-bold mb-2">¡Link Generado! Cópialo y envíalo:</p>
+                                        <input type="text" readOnly value={directPayLink} className="w-full bg-slate-800 text-white text-xs p-2 rounded border border-slate-700 mb-2" />
+                                        <a href={`https://wa.me/?text=${encodeURIComponent('Hola! Aquí tienes el link para pagar tu pedido: ' + directPayLink)}`} target="_blank" className="w-full bg-green-600 text-white py-2 rounded-lg font-bold text-center block">Compartir por WhatsApp</a>
+                                    </div>
+                                )}
+                            </div>
                         )}
 
                         {tab === 'productos' && (
@@ -638,7 +796,7 @@
             const [allOrders, setAllOrders] = useState([]);
             const [showForm, setShowForm] = useState(false);
             const [modalReceipt, setModalReceipt] = useState(null);
-            const [newBiz, setNewBiz] = useState({ name: '', id: '', password: '', rate: 5 });
+            const [newBiz, setNewBiz] = useState({ name: '', id: '', password: '', rate: 5, model: 'commission' });
 
             const [editWalletName, setEditWalletName] = useState('Yape');
             const [editWalletNumber, setEditWalletNumber] = useState('');
@@ -715,19 +873,27 @@
                 await bRef.set({
                     name: newBiz.name,
                     adminPassword: newBiz.password,
-                    commissionRate: parseFloat(newBiz.rate)/100 || 0.05,
+                    commissionRate: newBiz.model === 'subscription' ? 0 : (parseFloat(newBiz.rate)/100 || 0.05),
+                    planModel: newBiz.model,
                     createdAt: Date.now()
                 });
                 
                 await bRef.collection('products').add({ code: "P1", name: "Producto Ejemplo", price: 10.00, img: "https://via.placeholder.com/150", stock: 100, order: 1 });
                 
-                setNewBiz({ name: '', id: '', password: '', rate: 5 });
+                setNewBiz({ name: '', id: '', password: '', rate: 5, model: 'commission' });
                 setShowForm(false);
                 alert("Negocio creado con éxito.");
             };
 
             const approvePayment = async (bId, payId) => { await db.collection('businesses').doc(bId).collection('payments').doc(payId).update({ status: "Aprobado" }); };
             const rejectPayment = async (bId, payId) => { await db.collection('businesses').doc(bId).collection('payments').doc(payId).update({ status: "Rechazado" }); };
+
+            const toggleBizPlan = async (bId, currentModel) => {
+                const newModel = currentModel === 'subscription' ? 'commission' : 'subscription';
+                const newRate = newModel === 'subscription' ? 0 : 0.05; // 5% default if switching back
+                await db.collection('businesses').doc(bId).update({ planModel: newModel, commissionRate: newRate });
+                alert(`Plan cambiado a: ${newModel === 'subscription' ? 'Suscripción' : 'Comisión'}`);
+            };
 
             const updateBizRate = async (bId, rate) => {
                 await db.collection('businesses').doc(bId).update({ commissionRate: parseFloat(rate)/100 });
@@ -810,7 +976,10 @@
                                             <input type="text" value={newBiz.name} onChange={(e) => setNewBiz({...newBiz, name: e.target.value})} placeholder="Nombre (Ej: Lili Market)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
                                             <input type="text" value={newBiz.id} onChange={(e) => setNewBiz({...newBiz, id: e.target.value})} placeholder="ID URL (Ej: lili-market)" className="bg-slate-800 p-2 rounded border border-slate-700" required />
                                             <input type="text" value={newBiz.password} onChange={(e) => setNewBiz({...newBiz, password: e.target.value})} placeholder="Contraseña inicial" className="bg-slate-800 p-2 rounded border border-slate-700" required />
-                                            <input type="number" value={newBiz.rate} onChange={(e) => setNewBiz({...newBiz, rate: e.target.value})} placeholder="Comisión (%)" className="bg-slate-800 p-2 rounded border border-slate-700" />
+                                            <select value={newBiz.model} onChange={(e) => setNewBiz({...newBiz, model: e.target.value})} className="bg-slate-800 p-2 rounded border border-slate-700">
+                                                <option value="commission">Plan Comisión (5%)</option>
+                                                <option value="subscription">Plan Suscripción (S/ 29.90/mes)</option>
+                                            </select>
                                             <button type="submit" className="bg-green-500 text-white py-2 rounded font-bold col-span-full">Crear Negocio</button>
                                         </form>
                                     </div>
@@ -819,6 +988,7 @@
                                 <div className="space-y-4">
                                     {businesses.map(b => {
                                         const rate = b.commissionRate || 0.05;
+                                        const isSub = b.planModel === 'subscription';
                                         const bOrders = allOrders.filter(o => o.bizId === b.id && o.status === 'Entregado');
                                         const bCommission = bOrders.reduce((sum, o) => sum + (o.commissionAmount || o.total * rate), 0);
                                         const bPaid = allPayments.filter(p => p.bizId === b.id && p.status === 'Aprobado').reduce((sum, p) => sum + p.amountPaid, 0);
@@ -828,21 +998,28 @@
                                                 <div className="flex justify-between items-center mb-3">
                                                     <h4 className="text-lg font-bold">{b.name} <span className="text-slate-500 text-xs">({b.id})</span></h4>
                                                     <div className="flex items-center gap-2">
-                                                        <span className="text-xs text-slate-400">Comisión:</span>
-                                                        <input type="number" defaultValue={(rate*100).toFixed(0)} onBlur={(e) => updateBizRate(b.id, e.target.value)} className="w-12 bg-slate-800 text-white text-xs p-1 rounded border border-slate-700 text-center" title="Comisión (%)"/>
-                                                        <span className="text-xs text-slate-400">%</span>
+                                                        <span className={`text-xs px-2 py-1 rounded ${isSub ? 'bg-blue-900/50 text-blue-400' : 'bg-red-900/50 text-red-400'}`}>{isSub ? 'Suscripción' : 'Comisión'}</span>
+                                                        <button onClick={() => toggleBizPlan(b.id, b.planModel)} className="text-xs bg-slate-700 text-white px-2 py-1 rounded hover:bg-slate-600">Cambiar Plan</button>
                                                     </div>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-3 mb-4">
-                                                    <div className="bg-slate-950 p-3 rounded-lg text-center">
-                                                        <p className="text-xs text-slate-400 mb-1">Comisión Generada</p>
-                                                        <p className="text-lg font-bold text-green-400">S/ {bCommission.toFixed(2)}</p>
-                                                    </div>
-                                                    <div className="bg-slate-950 p-3 rounded-lg text-center">
-                                                        <p className="text-xs text-slate-400 mb-1">Deuda Actual</p>
-                                                        <p className="text-lg font-bold text-red-400">S/ {bDebt.toFixed(2)}</p>
+                                                    {!isSub && (
+                                                        <div className="bg-slate-950 p-3 rounded-lg text-center">
+                                                            <p className="text-xs text-slate-400 mb-1">Comisión Generada</p>
+                                                            <p className="text-lg font-bold text-green-400">S/ {bCommission.toFixed(2)}</p>
+                                                        </div>
+                                                    )}
+                                                    <div className={`bg-slate-950 p-3 rounded-lg text-center ${isSub ? 'col-span-2' : ''}`}>
+                                                        <p className="text-xs text-slate-400 mb-1">{isSub ? 'Estado de Suscripción' : 'Deuda Actual'}</p>
+                                                        <p className="text-lg font-bold text-red-400">{isSub ? 'Activa' : `S/ ${bDebt.toFixed(2)}`}</p>
                                                     </div>
                                                 </div>
+                                                {!isSub && (
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                        <span className="text-xs text-slate-400">Comisión (%):</span>
+                                                        <input type="number" defaultValue={(rate*100).toFixed(0)} onBlur={(e) => updateBizRate(b.id, e.target.value)} className="w-12 bg-slate-800 text-white text-xs p-1 rounded border border-slate-700 text-center" title="Comisión (%)"/>
+                                                    </div>
+                                                )}
                                                 <div className="text-sm text-slate-400 mb-3">
                                                     <p>Contraseña Admin: {b.adminPassword}</p>
                                                 </div>
